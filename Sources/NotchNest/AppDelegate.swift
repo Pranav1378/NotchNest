@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notch: NotchController!
     private var outputWatcher: OutputDeviceWatcher?
     private var screenshotWatcher: ScreenshotWatcher?
+    private var updater: Updater?
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         notch.start()
+        updater = Updater()
 
         // Started only for the real app, so test runs don't prompt for Location or touch the Tray.
         clipboard.start()
@@ -92,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vm?.close()
         if settingsWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(
-                rootView: SettingsView(auth: auth, calendar: calendar, weather: weather)))
+                rootView: SettingsView(auth: auth, calendar: calendar, weather: weather, updater: updater)))
             window.title = "NotchNest"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false

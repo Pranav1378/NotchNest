@@ -12,6 +12,9 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>SUFeedURL</key><string>https://github.com/Pranav1378/NotchNest/releases/latest/download/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUPublicEDKey</key><string>aVyGcJdQCSQWhjsZ2NWHWVNeoR922R562qX1SnPrc4o=</string>
     <key>NSLocationUsageDescription</key><string>NotchNest shows the weather where you are.</string>
     <key>NSLocationWhenInUseUsageDescription</key><string>NotchNest shows the weather where you are.</string>
     <key>NSCameraUsageDescription</key><string>NotchNest shows a live camera preview in the Mirror widget.</string>

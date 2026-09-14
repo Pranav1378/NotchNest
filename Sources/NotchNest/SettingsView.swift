@@ -5,12 +5,13 @@ struct SettingsView: View {
     let auth: GoogleAuth
     let calendar: CalendarService
     let weather: WeatherService
+    let updater: Updater?
 
     var body: some View {
         TabView {
             GoogleSettings(auth: auth, calendar: calendar)
                 .tabItem { Label("Google", systemImage: "person.crop.circle") }
-            GeneralSettings(weather: weather)
+            GeneralSettings(weather: weather, updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
         }
         .frame(width: 560, height: 620)
@@ -19,6 +20,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     let weather: WeatherService
+    let updater: Updater?
     @AppStorage(Prefs.openOnHover) private var openOnHover = true
     @AppStorage(Prefs.haptics) private var haptics = true
     @AppStorage(Prefs.swipeTracks) private var swipes = true
@@ -33,6 +35,7 @@ struct GeneralSettings: View {
     @AppStorage(Prefs.weatherCity) private var weatherCity = ""
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
+    @State private var autoUpdates = true
 
     var body: some View {
         Form {
@@ -72,6 +75,18 @@ struct GeneralSettings: View {
                 if weatherEnabled, let problem = weather.problem {
                     Text(problem).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            if let updater {
+                Section("Updates") {
+                    Toggle("Check for updates automatically", isOn: $autoUpdates)
+                        .onChange(of: autoUpdates) { _, enabled in updater.automaticallyChecks = enabled }
+                    HStack {
+                        Text("NotchNest \(Updater.currentVersion)").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Check for Updates…") { updater.checkForUpdates() }
+                    }
+                }
+                .onAppear { autoUpdates = updater.automaticallyChecks }
             }
             Section("System") {
                 Toggle("Launch at login", isOn: $launchAtLogin)
@@ -126,7 +141,8 @@ struct GoogleSettings: View {
                 Button("Sign out", role: .destructive) { auth.signOut() }
             }
             if !missingFeatures.isEmpty {
-                Text("\(missingFeatures.joined(separator: " and ").prefix(1).uppercased() + missingFeatures.joined(separator: " and ").dropFirst()) need\(missingFeatures.count == 1 ? "s" : "") one more sign-in. If Tasks is missing, turn on the Google Tasks API in your Cloud project first.")
+                let list = missingFeatures.joined(separator: " and ")
+                Text("\(list.prefix(1).uppercased() + list.dropFirst()) need\(missingFeatures.count == 1 ? "s" : "") one more sign-in. If Tasks is missing and you use your own Google client, turn on the Google Tasks API in your Cloud project first.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -153,49 +169,76 @@ struct GoogleSettings: View {
         }
     }
 
+    /// With a client built into the app, signing in is one button; the Google Cloud setup is only
+    /// needed by people who'd rather use their own client.
     @ViewBuilder private var setup: some View {
-        Section("1 · Create your Google OAuth client (one time, about 5 minutes)") {
-            VStack(alignment: .leading, spacing: 8) {
-                step(0, "Turn on 2-Step Verification for your Google account. Google Cloud won't open without it (it can take a few minutes to kick in).",
-                     link: "https://myaccount.google.com/signinoptions/two-step-verification")
-                step(1, "Open Google Cloud Console and create a project (any name).",
-                     link: "https://console.cloud.google.com/projectcreate")
-                step(2, "Enable the Google Calendar API for that project.",
-                     link: "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com")
-                step(3, "Enable the Google Tasks API for that project too.",
-                     link: "https://console.cloud.google.com/apis/library/tasks.googleapis.com")
-                step(4, "Google Auth Platform → Get started: app name \"NotchNest\", audience External, your email as contact.",
-                     link: "https://console.cloud.google.com/auth/overview")
-                step(5, "Audience → Test users → add your own Gmail address.",
-                     link: "https://console.cloud.google.com/auth/audience")
-                step(6, "Clients → Create client → Application type \"Desktop app\". Copy the Client ID and Client secret.",
-                     link: "https://console.cloud.google.com/auth/clients")
+        if GoogleAuth.hasBuiltInClient {
+            Section {
+                signInRow
+                Text("You sign in with your own Google account, and NotchNest only sees your own calendar and tasks. Tokens stay in your Mac's Keychain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 4)
-            Text("While the app is in \"Testing\", Google makes you sign in again every 7 days. To avoid that, choose Audience → Publish app. It stays private to you; Google just shows an \"unverified app\" warning the first time.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        Section("2 · Paste the credentials") {
-            TextField("Client ID", text: $auth.clientID, prompt: Text("1234-abc.apps.googleusercontent.com"))
-            SecureField("Client secret", text: $auth.clientSecret, prompt: Text("GOCSPX-…"))
-        }
-        Section {
-            HStack {
-                Button(auth.isSigningIn ? "Waiting for your browser…" : "Sign in with Google") {
-                    Task { await auth.signIn() }
+            Section {
+                DisclosureGroup("Use your own Google Cloud client instead") {
+                    cloudSteps
+                    credentialFields
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(auth.isSigningIn)
-                if auth.isSigningIn { Button("Cancel") { auth.cancelSignIn() } }
             }
-            if let message = auth.statusMessage {
-                Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        } else {
+            Section("1 · Create your Google OAuth client (one time, about 5 minutes)") {
+                cloudSteps
+                Text("While the app is in \"Testing\", Google makes you sign in again every 7 days. To avoid that, choose Audience → Publish app. It stays private to you; Google just shows an \"unverified app\" warning the first time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Text("NotchNest asks to read your calendar, add events you type in the notch, and manage your Google Tasks. Tokens stay in your Mac's Keychain.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Section("2 · Paste the credentials") { credentialFields }
+            Section {
+                signInRow
+                Text("NotchNest asks to read your calendar, add events you type in the notch, and manage your Google Tasks. Tokens stay in your Mac's Keychain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    @ViewBuilder private var signInRow: some View {
+        HStack {
+            Button(auth.isSigningIn ? "Waiting for your browser…" : "Sign in with Google") {
+                Task { await auth.signIn() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(auth.isSigningIn)
+            if auth.isSigningIn { Button("Cancel") { auth.cancelSignIn() } }
+        }
+        if let message = auth.statusMessage {
+            Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder private var credentialFields: some View {
+        TextField("Client ID", text: $auth.clientID, prompt: Text("1234-abc.apps.googleusercontent.com"))
+        SecureField("Client secret", text: $auth.clientSecret, prompt: Text("GOCSPX-…"))
+    }
+
+    private var cloudSteps: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            step(0, "Turn on 2-Step Verification for your Google account. Google Cloud won't open without it (it can take a few minutes to kick in).",
+                 link: "https://myaccount.google.com/signinoptions/two-step-verification")
+            step(1, "Open Google Cloud Console and create a project (any name).",
+                 link: "https://console.cloud.google.com/projectcreate")
+            step(2, "Enable the Google Calendar API for that project.",
+                 link: "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com")
+            step(3, "Enable the Google Tasks API for that project too.",
+                 link: "https://console.cloud.google.com/apis/library/tasks.googleapis.com")
+            step(4, "Google Auth Platform → Get started: app name \"NotchNest\", audience External, your email as contact.",
+                 link: "https://console.cloud.google.com/auth/overview")
+            step(5, "Audience → Test users → add your own Gmail address.",
+                 link: "https://console.cloud.google.com/auth/audience")
+            step(6, "Clients → Create client → Application type \"Desktop app\". Copy the Client ID and Client secret.",
+                 link: "https://console.cloud.google.com/auth/clients")
+        }
+        .padding(.vertical, 4)
     }
 
     private func step(_ number: Int, _ text: String, link: String) -> some View {

@@ -82,8 +82,20 @@ final class GoogleAuth {
     func whenSignedOut(_ handler: @escaping () -> Void) { signOutHandlers.append(handler) }
     func hasScope(_ scope: String) -> Bool { grantedScopes.contains(scope) }
 
-    private var trimmedID: String { clientID.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var trimmedSecret: String { clientSecret.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// A client built into release builds (from the git-ignored Config/GoogleClient.plist), so
+    /// people who install NotchNest can just sign in.
+    static let builtInClientID = Bundle.main.object(forInfoDictionaryKey: "NNGoogleClientID") as? String ?? ""
+    static let builtInClientSecret = Bundle.main.object(forInfoDictionaryKey: "NNGoogleClientSecret") as? String ?? ""
+    static var hasBuiltInClient: Bool { !builtInClientID.isEmpty && !builtInClientSecret.isEmpty }
+
+    /// Your own client if you entered one in Settings, otherwise the built-in one.
+    private var usesOwnClient: Bool { !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var trimmedID: String {
+        usesOwnClient ? clientID.trimmingCharacters(in: .whitespacesAndNewlines) : Self.builtInClientID
+    }
+    private var trimmedSecret: String {
+        usesOwnClient ? clientSecret.trimmingCharacters(in: .whitespacesAndNewlines) : Self.builtInClientSecret
+    }
 
     func signIn() async {
         await secretsLoaded?.value

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Copy to GoogleClient.plist (git-ignored) and fill in a Desktop-app OAuth client from a
+     separate "NotchNest Public" Google Cloud project. See MAINTAINING.md. -->
+<plist version="1.0">
+<dict>
+    <key>ClientID</key><string>1234-abc.apps.googleusercontent.com</string>
+    <key>ClientSecret</key><string>GOCSPX-your-secret</string>
+</dict>
+</plist>
