@@ -250,7 +250,9 @@ enum SelfTest {
             log("live activity showing: \(vm.liveActivity.map { "\($0)" } ?? "none") (want charging)")
             click(side)
             after(0.3) {
-                log("click on its side: hidden=\(vm.liveActivity == nil) (want true)")
+                // Something else (e.g. music that's playing) may take its place, so check the
+                // charging notice itself went away.
+                log("click on its side: hidden=\(vm.liveActivity != .charging) (want true)")
                 vm.chargingFlash = true
                 click(middle)
                 after(0.4) {
@@ -259,7 +261,7 @@ enum SelfTest {
                     vm.chargingFlash = true
                     after(0.3) {
                         swipe()
-                        log("two-finger swipe on it: hidden=\(vm.liveActivity == nil) (want true)")
+                        log("two-finger swipe on it: hidden=\(vm.liveActivity != .charging) (want true)")
                         testTabs()
                     }
                 }
