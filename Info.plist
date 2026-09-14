@@ -2,21 +2,37 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key><string>com.pranav.NotchNest</string>
-    <key>CFBundleName</key><string>NotchNest</string>
-    <key>CFBundleDisplayName</key><string>NotchNest</string>
-    <key>CFBundleExecutable</key><string>NotchNest</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
-    <key>LSUIElement</key><true/>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>SUFeedURL</key><string>https://github.com/Pranav1378/NotchNest/releases/latest/download/appcast.xml</string>
-    <key>SUEnableAutomaticChecks</key><true/>
-    <key>SUPublicEDKey</key><string>aVyGcJdQCSQWhjsZ2NWHWVNeoR922R562qX1SnPrc4o=</string>
-    <key>NSLocationUsageDescription</key><string>NotchNest shows the weather where you are.</string>
-    <key>NSLocationWhenInUseUsageDescription</key><string>NotchNest shows the weather where you are.</string>
-    <key>NSCameraUsageDescription</key><string>NotchNest shows a live camera preview in the Mirror widget.</string>
+	<key>CFBundleDisplayName</key>
+	<string>NotchNest</string>
+	<key>CFBundleExecutable</key>
+	<string>NotchNest</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.pranav.NotchNest</string>
+	<key>CFBundleName</key>
+	<string>NotchNest</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>NotchNest shows a live camera preview in the Mirror widget.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSLocationUsageDescription</key>
+	<string>NotchNest shows the weather where you are.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>NotchNest shows the weather where you are.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/Pranav1378/NotchNest/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>aVyGcJdQCSQWhjsZ2NWHWVNeoR922R562qX1SnPrc4o=</string>
 </dict>
 </plist>
