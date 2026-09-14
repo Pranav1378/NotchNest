@@ -1,0 +1,11 @@
+# Build output
+.build/
+build/
+*.zip
+.DS_Store
+
+# The Google OAuth client baked into release builds — stays on your Mac only
+Config/GoogleClient.plist
+
+# Sparkle's private update-signing key, if you ever export it (it normally lives in your Keychain)
+*.key
