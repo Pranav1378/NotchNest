@@ -328,7 +328,7 @@ struct MirrorWidget: View {
         ZStack {
             shape.fill(Color.white.opacity(0.08))
             if camera.isRunning {
-                CameraPreview(session: camera.session).clipShape(shape)
+                CameraPreview(preview: camera.previewLayer).clipShape(shape)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: camera.denied ? "video.slash.fill" : "camera.fill").font(.system(size: 20))
@@ -346,27 +346,41 @@ struct MirrorWidget: View {
     }
 }
 
+/// Hosts `CameraMirror.previewLayer`. The layer is shared and never recreated (see CameraMirror), so
+/// this view only borrows it: adding it here moves it out of any older view.
 struct CameraPreview: NSViewRepresentable {
-    let session: AVCaptureSession
+    let preview: AVCaptureVideoPreviewLayer
 
-    func makeNSView(context: Context) -> PreviewView { PreviewView(session: session) }
+    func makeNSView(context: Context) -> PreviewView { PreviewView(preview: preview) }
     func updateNSView(_ nsView: PreviewView, context: Context) {}
+    static func dismantleNSView(_ nsView: PreviewView, coordinator: ()) { nsView.release() }
 
     final class PreviewView: NSView {
         private let preview: AVCaptureVideoPreviewLayer
 
-        init(session: AVCaptureSession) {
-            preview = AVCaptureVideoPreviewLayer(session: session)
+        init(preview: AVCaptureVideoPreviewLayer) {
+            self.preview = preview
             super.init(frame: .zero)
-            preview.videoGravity = .resizeAspectFill
-            layer = preview
             wantsLayer = true
-            if let connection = preview.connection, connection.isVideoMirroringSupported {
-                connection.automaticallyAdjustsVideoMirroring = false
-                connection.isVideoMirrored = true
-            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer?.addSublayer(preview)
+            CATransaction.commit()
         }
 
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            preview.frame = bounds
+            CATransaction.commit()
+        }
+
+        /// Give the layer up only if a newer preview hasn't already taken it.
+        func release() {
+            if preview.superlayer === layer { preview.removeFromSuperlayer() }
+        }
     }
 }

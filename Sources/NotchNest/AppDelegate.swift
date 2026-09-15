@@ -54,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SelfTest.run(vm: vm, notch: notch)
             return
         }
+        if args.contains("--cameratest") {
+            SelfTest.runCamera(vm: vm, notch: notch)
+            return
+        }
         notch.start()
         updater = Updater()
 

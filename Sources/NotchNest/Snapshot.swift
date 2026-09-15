@@ -271,6 +271,41 @@ enum SelfTest {
         after(0.8) { testLiveActivity() }
     }
 
+    /// `--cameratest`: open the Nook and flip the Mirror on and off, slow then fast, so its preview view
+    /// comes and goes each time. Before the shared preview layer, the second "on" aborted the app.
+    /// Results also go to cameratest.log, since the camera grant needs the app launched with `open`.
+    static func runCamera(vm: NotchViewModel, notch: NotchController) {
+        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("NotchNest/cameratest.log")
+        try? "".write(to: file, atomically: true, encoding: .utf8)
+        func note(_ line: String) {
+            log(line)
+            if let handle = try? FileHandle(forWritingTo: file) {
+                handle.seekToEndOfFile()
+                handle.write(Data((line + "\n").utf8))
+                try? handle.close()
+            }
+        }
+        vm.tab = .nook
+        notch.showForTest()
+        vm.isOpen = true
+        let gaps: [Double] = [1.5, 1.5, 1.0, 1.0, 0.6, 0.6, 0.3, 0.3, 0.15, 0.15, 0.8, 0.8]
+        func step(_ i: Int) {
+            guard i < gaps.count else {
+                vm.camera.stop()
+                after(1.0) {
+                    note("survived \(gaps.count) toggles (want this line)")
+                    exit(0)
+                }
+                return
+            }
+            vm.camera.toggle()
+            note("toggle \(i + 1): running=\(vm.camera.isRunning) denied=\(vm.camera.denied) open=\(vm.isOpen)")
+            after(gaps[i]) { step(i + 1) }
+        }
+        after(1.0) { step(0) }
+    }
+
     private static func after(_ seconds: Double, _ work: @escaping @MainActor () -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { MainActor.assumeIsolated { work() } }
     }

@@ -6,6 +6,10 @@ final class CameraMirror {
     private(set) var isRunning = false
     private(set) var denied = false
     @ObservationIgnored let session = AVCaptureSession()
+    /// One preview layer for the app's lifetime. Attaching a layer adds a connection to the session, and
+    /// doing that while `startRunning` walks the connections on `queue` crashes ("mutated while being
+    /// enumerated") — so it's attached once, before the session ever runs, and every Mirror view reuses it.
+    @ObservationIgnored let previewLayer = AVCaptureVideoPreviewLayer()
     @ObservationIgnored private var configured = false
     @ObservationIgnored private let queue = DispatchQueue(label: "NotchNest.camera")
 
@@ -50,6 +54,12 @@ final class CameraMirror {
             session.sessionPreset = .medium
             if session.canAddInput(input) { session.addInput(input) }
             session.commitConfiguration()
+            previewLayer.videoGravity = .resizeAspectFill
+            previewLayer.session = session
+            if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = true
+            }
             configured = true
         }
         denied = false
