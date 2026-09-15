@@ -66,6 +66,7 @@ final class NotchController {
     private var gestureX: CGFloat = 0
     private var gestureY: CGFloat = 0
     private var gestureFired = false
+    private var displayMode = DisplayMode.current
 
     init(vm: NotchViewModel) {
         self.vm = vm
@@ -78,6 +79,15 @@ final class NotchController {
             self.panel.allowsKey = true
             self.panel.makeKey()
         }
+        vm.pointerInside = { [weak self] in self?.shapeRect().contains(NSEvent.mouseLocation) ?? false }
+    }
+
+    /// The black shape, in screen coordinates.
+    private func shapeRect() -> CGRect {
+        let geo = vm.geometry
+        let size = vm.shapeSize
+        return CGRect(x: geo.notchMidX - size.width / 2, y: geo.screenTop - size.height,
+                      width: size.width, height: size.height + 1)
     }
 
     func start() {
@@ -96,6 +106,15 @@ final class NotchController {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.place() } }
+        // Settings → "Show the notch on" takes effect straight away.
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, DisplayMode.current != self.displayMode else { return }
+                self.displayMode = DisplayMode.current
+                self.vm.close()
+                self.place()
+            }
+        }
 
         installScrollMonitor()
         pasteKey = HotKey(keyCode: kVK_ANSI_V, id: 1) { [weak self] in self?.pasteIntoTray() }
@@ -123,7 +142,10 @@ final class NotchController {
 
     private func place() {
         let geo = NotchGeometry.current()
-        vm.geometry = geo
+        if geo != vm.geometry {
+            vm.geometry = geo
+            ActivityLog.note("notch on \(geo.hasNotch ? "the notched" : "a notchless") screen at \(Int(geo.screenFrame.minX)),\(Int(geo.screenFrame.minY)) (\(Int(geo.screenFrame.width))×\(Int(geo.screenFrame.height)))")
+        }
         let size = Self.windowSize
         panel.setFrame(NSRect(x: geo.notchMidX - size.width / 2, y: geo.screenTop - size.height,
                               width: size.width, height: size.height), display: true)
@@ -131,11 +153,13 @@ final class NotchController {
 
     private func tick() {
         let mouse = NSEvent.mouseLocation
+        // "The display the pointer is on": follow it to another screen while the notch is closed.
+        if displayMode == .pointer, !vm.isOpen, !vm.geometry.screenFrame.insetBy(dx: 0, dy: -1).contains(mouse) {
+            place()
+        }
         let geo = vm.geometry
         let top = geo.screenTop
-        let size = vm.shapeSize
-        let shape = CGRect(x: geo.notchMidX - size.width / 2, y: top - size.height,
-                           width: size.width, height: size.height + 1)
+        let shape = shapeRect()
 
         // Closed: only the notch itself is a hover target, so the menu bar beside it stays usable.
         let zone = vm.isOpen

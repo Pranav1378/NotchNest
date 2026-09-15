@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notch: NotchController!
     private var outputWatcher: OutputDeviceWatcher?
     private var screenshotWatcher: ScreenshotWatcher?
+    private var downloadWatcher: DownloadWatcher?
+    private var claude: ClaudeBridge!
+    private var privacy: PrivacyMonitor!
+    private var keepAwake: KeepAwake!
     private var updater: Updater?
     private var settingsWindow: NSWindow?
 
@@ -32,10 +36,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tray = TrayStore()
         clipboard = ClipboardHistory()
         weather = WeatherService()
+        let args = CommandLine.arguments
+        // Test runs listen on their own port, so they don't collide with the NotchNest you're using.
+        let testing = ["--selftest", "--featuretest", "--snapshot"].contains(where: args.contains)
+        claude = ClaudeBridge(port: testing ? ClaudeBridge.defaultPort + 1 : ClaudeBridge.defaultPort)
+        privacy = PrivacyMonitor()
+        keepAwake = KeepAwake()
 
         vm = NotchViewModel(media: media, calendar: calendar, battery: battery, tray: tray, camera: camera,
                             tasks: tasks, clipboard: clipboard, lyrics: LyricsService(), weather: weather,
-                            stats: SystemStats())
+                            stats: SystemStats(), timer: FocusTimer(), claude: claude, privacy: privacy,
+                            keepAwake: keepAwake)
         vm.openSettings = { [weak self] in self?.showSettings() }
 
         media.start()
@@ -43,7 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         calendar.start()
         tasks.start()
 
-        let args = CommandLine.arguments
         if let flag = args.firstIndex(of: "--snapshot"), flag + 1 < args.count {
             Snapshot.run(vm: vm, to: args[flag + 1])
             return
@@ -52,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notch = NotchController(vm: vm)
         if args.contains("--selftest") {
             SelfTest.run(vm: vm, notch: notch)
+            return
+        }
+        if args.contains("--featuretest") {
+            FeatureTest.run(vm: vm, notch: notch)
             return
         }
         if args.contains("--cameratest") {
@@ -76,6 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenshotWatcher.start()
         self.screenshotWatcher = screenshotWatcher
 
+        claude.start()
+        privacy.start()
+        downloadWatcher = DownloadWatcher { [weak self] url in
+            guard let self else { return }
+            let auto = Prefs.bool(Prefs.autoDownloads)
+            if auto { self.tray.add([url]) }
+            self.vm.downloadFinished(url, inTray: auto)
+        }
+        updateDownloadWatcher()
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateDownloadWatcher() }
+        }
+
         if !Prefs.bool(Prefs.hasLaunched) {
             UserDefaults.standard.set(true, forKey: Prefs.hasLaunched)
             showSettings()
@@ -91,6 +118,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         media?.stop()
         camera?.stop()
+        privacy?.stop()  // never quit with the microphones left muted
+        keepAwake?.off()
+    }
+
+    /// ~/Downloads is only watched while a Downloads setting is on (macOS asks once for access).
+    private func updateDownloadWatcher() {
+        guard let downloadWatcher else { return }
+        let wanted = Prefs.bool(Prefs.downloadActivity) || Prefs.bool(Prefs.autoDownloads)
+        if wanted && !downloadWatcher.isRunning { downloadWatcher.start() }
+        if !wanted && downloadWatcher.isRunning { downloadWatcher.stop() }
     }
 
     func showSettings() {
@@ -98,7 +135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vm?.close()
         if settingsWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(
-                rootView: SettingsView(auth: auth, calendar: calendar, weather: weather, updater: updater)))
+                rootView: SettingsView(auth: auth, calendar: calendar, weather: weather, updater: updater,
+                                       claude: claude)))
             window.title = "NotchNest"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false

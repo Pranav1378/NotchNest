@@ -16,7 +16,7 @@ final class TrayStore {
     /// Shows a short confirmation in the notch (wired to `NotchViewModel.showToast`).
     @ObservationIgnored var announce: (String) -> Void = { _ in }
 
-    private static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("NotchNest/Tray", isDirectory: true)
 
     init() {
@@ -105,6 +105,37 @@ final class TrayStore {
             NSPasteboard.general.setString(text, forType: .string)
             ActivityLog.note("copied \(text.count) characters of text from \(readable.count) file(s)")
             announce("Copied text (\(text.count) characters)")
+        }
+    }
+
+    /// Saves each image as a new file in the chosen format, next to the Tray's other copies.
+    func convert(_ chosen: [TrayItem], to format: FileTools.ImageFormat) {
+        var made: [URL] = []
+        var failures = 0
+        for item in chosen where FileTools.isImage(item.url) && !format.matches(item.url) {
+            do { made.append(try FileTools.convert(item.url, to: format, in: Self.folder)) } catch { failures += 1 }
+        }
+        let added = add(made)
+        ActivityLog.note("converted \(made.count) image(s) to \(format.title), \(failures) failed")
+        if added > 0 {
+            announce(added == 1 ? "Saved \(made[0].lastPathComponent)" : "Saved \(added) \(format.title) files")
+        } else {
+            announce(failures > 0 ? "Couldn't convert that" : "Already \(format.title)")
+        }
+    }
+
+    func zip(_ chosen: [TrayItem]) {
+        let urls = chosen.map(\.url)
+        announce("Zipping…")
+        Task {
+            do {
+                let archive = try await FileTools.zip(urls, in: Self.folder)
+                add([archive])
+                announce("Made \(archive.lastPathComponent)")
+            } catch {
+                ActivityLog.note("zip failed: \(error.localizedDescription)")
+                announce("Couldn't zip that")
+            }
         }
     }
 

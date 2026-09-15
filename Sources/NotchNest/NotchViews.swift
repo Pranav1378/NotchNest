@@ -11,7 +11,7 @@ struct NotchRootView: View {
         let _ = (musicActivity, eventActivity, lyricsEnabled)
         let size = vm.shapeSize
         let shape = NotchShape(topRadius: vm.isOpen ? NotchViewModel.openFlare : NotchViewModel.closedFlare,
-                               bottomRadius: vm.isOpen ? 28 : (vm.showsLyrics ? 14 : 10))
+                               bottomRadius: vm.isOpen ? 28 : (vm.detailHeight > 0 ? 14 : 10))
         ZStack(alignment: .top) {
             shape.fill(Color.black)
                 .shadow(color: .black.opacity(vm.isOpen ? 0.6 : 0), radius: 18, y: 8)
@@ -21,11 +21,13 @@ struct NotchRootView: View {
         }
         .frame(width: size.width, height: size.height)
         .contentShape(shape)
-        .overlay {
+        .overlay(alignment: .top) {
+            // Only the notch row: the row under it (lyrics, Allow/Deny, Add to Tray) takes its own clicks.
             if !vm.isOpen {
-                Color.clear.contentShape(Rectangle()).onTapGesture { location in
-                    closedTap(at: location, width: size.width)
-                }
+                Color.clear
+                    .frame(height: vm.geometry.notchSize.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in closedTap(at: location, width: size.width) }
             }
         }
         .contextMenu {
@@ -44,18 +46,29 @@ struct NotchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.notch, value: vm.liveActivity)
         .animation(.notch, value: vm.miniActivity)
-        .animation(.notch, value: vm.showsLyrics)
+        .animation(.notch, value: vm.detailHeight)
         .environment(\.colorScheme, .dark)
     }
 
-    /// On the closed notch: the sides of a live activity shrink it, the sides of a small one
-    /// bring it back, and anywhere else opens the notch.
+    /// On the closed notch: the sides of a live activity shrink it (except where they're a button:
+    /// mute, Join, back to Claude), the sides of a small one bring it back, anywhere else opens it.
     private func closedTap(at location: CGPoint, width: CGFloat) {
         let flare = NotchViewModel.closedFlare
-        let onTopRow = location.y <= vm.geometry.notchSize.height
-        if vm.liveActivity != nil, onTopRow,
-           location.x < flare + NotchViewModel.wing || location.x > width - flare - NotchViewModel.wing {
-            vm.dismissLiveActivity()
+        let onLeft = location.x < flare + NotchViewModel.wing
+        let onRight = location.x > width - flare - NotchViewModel.wing
+        if let activity = vm.liveActivity, onLeft || onRight {
+            switch activity {
+            case .privacy where vm.privacy.micInUse:
+                vm.privacy.toggleMute()
+            case .event where onRight && vm.calendar.imminentEvent?.meetLink != nil:
+                vm.joinImminentEvent()
+            case .claudeDone:
+                vm.openClaudeHost(vm.claudeDone?.hostApp)
+            case .claudeAsk:
+                break  // answered with the buttons underneath
+            default:
+                vm.dismissLiveActivity()
+            }
         } else if vm.miniActivity != nil,
                   location.x < flare + NotchViewModel.miniWing || location.x > width - flare - NotchViewModel.miniWing {
             vm.restoreLiveActivity()
@@ -104,13 +117,23 @@ struct OpenNotchView: View {
                 StatusCard(vm: vm)
                     .padding(.top, vm.geometry.notchSize.height + 26)
                     .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+            } else if vm.timerCardShown {
+                TimerCard(vm: vm)
+                    .padding(.top, vm.geometry.notchSize.height + 26)
+                    .padding(.trailing, 60)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
             }
         }
         .overlay(alignment: .bottom) {
-            if let toast = vm.toast {
+            if let request = vm.claudeRequest {
+                ClaudeAskBar(request: request, bridge: vm.claude, waiting: vm.claude.pending.count)
+                    .padding(.bottom, 2)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let toast = vm.toast {
                 ToastView(text: toast).padding(.bottom, 2).transition(.opacity)
             }
         }
+        .animation(.smooth(duration: 0.2), value: vm.claudeRequest)
     }
 
     private var header: some View {
@@ -123,6 +146,7 @@ struct OpenNotchView: View {
                 TrayModeSwitch(vm: vm).padding(.leading, 8).transition(.opacity)
             }
             Spacer()
+            TimerButton(vm: vm)
             StatusButton(vm: vm)
             Button(action: vm.openSettings) {
                 Image(systemName: "gearshape.fill")
@@ -173,6 +197,9 @@ struct StatusButton: View {
     var body: some View {
         Button { vm.toggleStatusCard() } label: {
             HStack(spacing: 8) {
+                if vm.keepAwake.isOn {
+                    Image(systemName: "cup.and.saucer.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                }
                 if weatherEnabled, let weather = vm.weather.now {
                     HStack(spacing: 3) {
                         Image(systemName: weather.symbol).symbolRenderingMode(.multicolor).font(.system(size: 11))
@@ -221,6 +248,33 @@ struct StatusCard: View {
                 row("arrow.up.arrow.down", title: "↓ \(SystemSnapshot.rate(snapshot.download))",
                     detail: "↑ \(SystemSnapshot.rate(snapshot.upload))")
             }
+            ForEach(vm.bluetoothDevices.prefix(4)) { device in
+                row(device.symbol, title: "\(device.name) \(device.level)%", detail: "")
+                    .foregroundStyle(device.level <= 20 ? Color.red : Color.primary)
+            }
+            Divider().overlay(Color.white.opacity(0.08))
+            Button { vm.keepAwake.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: vm.keepAwake.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+                        .font(.system(size: 12))
+                        .foregroundStyle(vm.keepAwake.isOn ? Color.orange : Color.primary)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Keep Awake").font(.system(size: 11, weight: .semibold))
+                        Text(vm.keepAwake.isOn ? "On: the screen won't sleep" : "Stop the screen from sleeping")
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Capsule()
+                        .fill(vm.keepAwake.isOn ? Color.orange : Color.white.opacity(0.18))
+                        .frame(width: 26, height: 15)
+                        .overlay(alignment: vm.keepAwake.isOn ? .trailing : .leading) {
+                            Circle().fill(Color.white).padding(2)
+                        }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(12)
         .frame(width: 236, alignment: .leading)
@@ -278,11 +332,7 @@ struct LiveActivityView: View {
                 Spacer(minLength: vm.geometry.notchSize.width)
                 trailing.frame(width: side, height: height, alignment: .trailing)
             }
-            if vm.showsLyrics {
-                LyricLineView(lyrics: vm.lyrics, media: vm.media)
-                    .frame(height: NotchViewModel.lyricsHeight - 4)
-                    .transition(.opacity)
-            }
+            detailRow.transition(.opacity)
         }
         .padding(.horizontal, NotchViewModel.closedFlare + 8)
         .task(id: "\(vm.media.trackIdentity)|\(wantsLyrics)") {
@@ -292,10 +342,69 @@ struct LiveActivityView: View {
         }
     }
 
+    /// The row under the notch (see `NotchViewModel.detailHeight`).
+    @ViewBuilder private var detailRow: some View {
+        switch activity {
+        case .music where vm.showsLyrics:
+            LyricLineView(lyrics: vm.lyrics, media: vm.media)
+                .frame(height: NotchViewModel.lyricsHeight - 4)
+                .contentShape(Rectangle())
+                .onTapGesture { vm.open() }
+        case .claudeAsk:
+            if let request = vm.claudeRequest {
+                ClaudeAskRow(request: request, bridge: vm.claude).frame(height: 32)
+            }
+        case .download:
+            if let notice = vm.downloadNotice { DownloadRow(notice: notice, vm: vm).frame(height: 22) }
+        case .claudeDone:
+            if let done = vm.claudeDone {
+                Text(done.message.isEmpty ? "Finished its turn" : done.message)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 22)
+                    .contentShape(Rectangle())
+                    .onTapGesture { vm.openClaudeHost(done.hostApp) }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
     @ViewBuilder private var leading: some View {
         switch activity {
         case .music:
             ArtworkView(media: vm.media, size: 22, corner: 6)
+        case .timer:
+            Image(systemName: vm.timer.isPaused ? "pause.circle.fill" : "timer")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(vm.timer.tint)
+        case .timerDone:
+            HStack(spacing: 4) {
+                Image(systemName: "bell.fill").font(.system(size: 11, weight: .bold))
+                Text(vm.timerAlert?.title ?? "Time's up").font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.orange)
+            .fixedSize()
+        case .privacy:
+            HStack(spacing: 5) {
+                if vm.privacy.cameraInUse {
+                    Image(systemName: "video.fill").font(.system(size: 11)).foregroundStyle(.green)
+                }
+                if vm.privacy.micInUse {
+                    Image(systemName: "mic.fill").font(.system(size: 11)).foregroundStyle(.orange)
+                }
+            }
+        case .download:
+            Image(systemName: "arrow.down.circle.fill").font(.system(size: 15)).foregroundStyle(.blue)
+        case .claudeAsk, .claudeDone:
+            HStack(spacing: 4) {
+                Image(systemName: "sparkle").font(.system(size: 11, weight: .bold))
+                Text(activity == .claudeAsk ? "Claude" : "Done").font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(Color.claude)
+            .fixedSize()
         case .charging:
             HStack(spacing: 4) {
                 Image(systemName: "bolt.fill").font(.system(size: 11, weight: .bold))
@@ -316,7 +425,43 @@ struct LiveActivityView: View {
     @ViewBuilder private var trailing: some View {
         switch activity {
         case .music:
-            WaveformView(color: vm.media.accent, playing: vm.media.isPlaying).frame(width: 20, height: 14)
+            if vm.timerBesideMusic {
+                TimerText(timer: vm.timer)
+            } else {
+                WaveformView(color: vm.media.accent, playing: vm.media.isPlaying).frame(width: 20, height: 14)
+            }
+        case .timer:
+            TimerText(timer: vm.timer)
+        case .timerDone:
+            Text(vm.timerAlert?.detail ?? "")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        case .privacy:
+            if vm.privacy.micInUse {
+                HStack(spacing: 3) {
+                    Image(systemName: vm.privacy.micMuted ? "mic.slash.fill" : "mic.fill").font(.system(size: 11))
+                    Text(vm.privacy.micMuted ? "Muted" : "Mute").font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(vm.privacy.micMuted ? Color.red : Color.white.opacity(0.8))
+                .fixedSize()
+                .help(vm.privacy.micMuted ? "Click to unmute your microphone" : "Click to mute your microphone")
+            } else {
+                Text("Camera on").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).fixedSize()
+            }
+        case .download:
+            if let notice = vm.downloadNotice { FileIcon(url: notice.url, size: 20) }
+        case .claudeAsk:
+            Text(vm.claude.pending.count > 1 ? "\(vm.claude.pending.count) waiting" : (vm.claudeRequest?.project ?? ""))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        case .claudeDone:
+            Text(vm.claudeDone?.project ?? "")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         case .charging:
             HStack(spacing: 4) {
                 Text("\(vm.battery.percent)%").font(.system(size: 11, weight: .semibold).monospacedDigit())
@@ -336,11 +481,23 @@ struct LiveActivityView: View {
                 Text("Connected").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).fixedSize()
             }
         case .event:
-            TimelineView(.periodic(from: .now, by: 15)) { context in
-                Text(vm.calendar.imminentEvent.map { countdown(to: $0.start, now: context.date) } ?? "")
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(vm.calendar.imminentEvent?.color ?? .blue)
+            HStack(spacing: 5) {
+                TimelineView(.periodic(from: .now, by: 15)) { context in
+                    Text(vm.calendar.imminentEvent.map { countdown(to: $0.start, now: context.date) } ?? "")
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(vm.calendar.imminentEvent?.color ?? .blue)
+                }
+                if vm.calendar.imminentEvent?.meetLink != nil {
+                    Text("Join")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.green))
+                        .help("Join the video call")
+                }
             }
+            .fixedSize()
         }
     }
 
@@ -392,18 +549,30 @@ struct MiniActivityView: View {
     }
 
     @ViewBuilder private var leading: some View {
-        if activity == .music {
+        switch activity {
+        case .music:
             ArtworkView(media: vm.media, size: 14, corner: 4)
-        } else {
+        case .privacy:
+            Circle().fill(vm.privacy.micInUse ? Color.orange : Color.green).frame(width: 6, height: 6)
+        case .timer:
+            Image(systemName: "timer").font(.system(size: 9, weight: .semibold)).foregroundStyle(vm.timer.tint)
+        default:
             Circle().fill(vm.calendar.imminentEvent?.color ?? .blue).frame(width: 6, height: 6)
         }
     }
 
     @ViewBuilder private var trailing: some View {
-        if activity == .music {
+        switch activity {
+        case .music:
             WaveformView(color: vm.media.accent, playing: vm.media.isPlaying, barWidth: 2, barHeight: 9)
                 .frame(width: 14, height: 10)
-        } else {
+        case .privacy:
+            Image(systemName: vm.privacy.micMuted ? "mic.slash.fill" : (vm.privacy.micInUse ? "mic.fill" : "video.fill"))
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(vm.privacy.micMuted ? Color.red : (vm.privacy.micInUse ? Color.orange : Color.green))
+        case .timer:
+            Circle().fill(vm.timer.tint).frame(width: 5, height: 5)
+        default:
             Image(systemName: "calendar").font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(vm.calendar.imminentEvent?.color ?? .blue)
         }

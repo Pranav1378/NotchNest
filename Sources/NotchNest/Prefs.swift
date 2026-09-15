@@ -51,14 +51,30 @@ enum Prefs {
     static let trayItems = "trayItems"
     static let lastTab = "lastTab"
     static let hasLaunched = "hasLaunched"
+    static let displayMode = "displayMode"
+    static let timerActivity = "timerActivity"
+    static let timerSound = "timerSound"
+    static let pomodoroFocus = "pomodoroFocus"
+    static let pomodoroBreak = "pomodoroBreak"
+    static let pomodoroAuto = "pomodoroAuto"
+    static let privacyActivity = "privacyActivity"
+    static let downloadActivity = "downloadActivity"
+    static let autoDownloads = "autoDownloads"
+    static let claudeAlerts = "claudeAlerts"
+    static let claudeWait = "claudeWait"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
             openOnHover: true, haptics: true, swipeTracks: true,
             musicActivity: true, eventActivity: true, chargingActivity: true,
             lyrics: true, headphonesActivity: true, autoScreenshots: true, clipboardHistory: true, weather: true,
+            displayMode: DisplayMode.notch.rawValue,
+            timerActivity: true, timerSound: true, pomodoroFocus: 25, pomodoroBreak: 5, pomodoroAuto: true,
+            privacyActivity: true, downloadActivity: true, autoDownloads: false,
+            claudeAlerts: true, claudeWait: 60,
         ])
     }
 
     static func bool(_ key: String) -> Bool { UserDefaults.standard.bool(forKey: key) }
+    static func int(_ key: String) -> Int { UserDefaults.standard.integer(forKey: key) }
 }

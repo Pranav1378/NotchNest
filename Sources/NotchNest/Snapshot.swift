@@ -21,10 +21,65 @@ enum Snapshot {
                 vm.tab = .nook
                 vm.statusCardShown = true
                 render(vm, name: "open-status", to: directory)
+                vm.statusCardShown = false
                 vm.tab = savedTab
-                exit(0)
+                Task { await newStates(vm, to: directory) }
             }
         }
+    }
+
+    /// The live activities and cards added for the timer, Claude Code, downloads and other screens.
+    private static func newStates(_ vm: NotchViewModel, to directory: String) async {
+        vm.isOpen = true
+        vm.timerCardShown = true
+        render(vm, name: "open-timer-idle", to: directory)
+        vm.timer.start(minutes: 25)
+        render(vm, name: "open-timer-running", to: directory)
+        vm.timerCardShown = false
+        vm.isOpen = false
+        render(vm, name: "closed-timer", to: directory)
+
+        vm.timerAlert = TimerAlert(title: "Focus done", detail: "Break · 5 min")
+        render(vm, name: "closed-timer-done", to: directory)
+        vm.timerAlert = nil
+
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        vm.downloadNotice = DownloadNotice(url: downloads.appendingPathComponent("CS 425 Lecture 7 slides.pdf"), inTray: false)
+        render(vm, name: "closed-download", to: directory)
+        vm.downloadNotice = nil
+
+        vm.claudeDone = ClaudeFinished(project: "NotchNest", message: "Added the timer and Claude Code alerts. All checks pass.",
+                                       hostApp: nil)
+        render(vm, name: "closed-claude-done", to: directory)
+        vm.claudeDone = nil
+
+        // A real request through the bridge (on the test port).
+        vm.claude.start()
+        try? await Task.sleep(for: .seconds(0.4))
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(vm.claude.port)/claude/permission")!)
+        request.httpMethod = "POST"
+        request.setValue("1", forHTTPHeaderField: "X-NotchNest")
+        request.httpBody = Data(#"{"tool_name":"Bash","cwd":"/Users/me/NotchNest","tool_input":{"command":"swift build -c release && ./build.sh"}}"#.utf8)
+        let asking = Task { try? await URLSession.shared.data(for: request) }
+        try? await Task.sleep(for: .seconds(0.6))
+        render(vm, name: "closed-claude-ask", to: directory)
+        vm.isOpen = true
+        render(vm, name: "open-claude-ask", to: directory)
+        vm.isOpen = false
+        if let id = vm.claudeRequest?.id { vm.claude.answer(id, .terminal) }
+        _ = await asking.value
+
+        // An external monitor: the pill in its menu bar.
+        vm.geometry = NotchGeometry.make(frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+                                         visibleFrame: CGRect(x: 0, y: 0, width: 2560, height: 1415), safeTop: 0,
+                                         leftArea: nil, rightArea: nil)
+        vm.timer.stop()
+        render(vm, name: "notchless-closed", to: directory)
+        vm.timer.start(minutes: 12)
+        render(vm, name: "notchless-timer", to: directory)
+        vm.isOpen = true
+        render(vm, name: "notchless-open", to: directory)
+        exit(0)
     }
 
     fileprivate static func render(_ vm: NotchViewModel, name: String, to directory: String) {

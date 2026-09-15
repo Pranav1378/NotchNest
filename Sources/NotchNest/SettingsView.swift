@@ -6,6 +6,7 @@ struct SettingsView: View {
     let calendar: CalendarService
     let weather: WeatherService
     let updater: Updater?
+    let claude: ClaudeBridge
 
     var body: some View {
         TabView {
@@ -13,6 +14,8 @@ struct SettingsView: View {
                 .tabItem { Label("Google", systemImage: "person.crop.circle") }
             GeneralSettings(weather: weather, updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            ClaudeSettings(claude: claude)
+                .tabItem { Label("Claude Code", systemImage: "sparkle") }
         }
         .frame(width: 560, height: 620)
     }
@@ -33,6 +36,15 @@ struct GeneralSettings: View {
     @AppStorage(Prefs.clipboardHistory) private var clipboardHistory = true
     @AppStorage(Prefs.weather) private var weatherEnabled = true
     @AppStorage(Prefs.weatherCity) private var weatherCity = ""
+    @AppStorage(Prefs.displayMode) private var displayMode = DisplayMode.notch.rawValue
+    @AppStorage(Prefs.timerActivity) private var timerActivity = true
+    @AppStorage(Prefs.timerSound) private var timerSound = true
+    @AppStorage(Prefs.pomodoroFocus) private var pomodoroFocus = 25
+    @AppStorage(Prefs.pomodoroBreak) private var pomodoroBreak = 5
+    @AppStorage(Prefs.pomodoroAuto) private var pomodoroAuto = true
+    @AppStorage(Prefs.privacyActivity) private var privacyActivity = true
+    @AppStorage(Prefs.downloadActivity) private var downloadActivity = true
+    @AppStorage(Prefs.autoDownloads) private var autoDownloads = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
     @State private var autoUpdates = true
@@ -48,6 +60,14 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section("Displays") {
+                Picker("Show the notch on", selection: $displayMode) {
+                    ForEach(DisplayMode.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+                }
+                Text("On a screen without a notch (an external monitor, an M1 MacBook Air, or with the lid closed), NotchNest draws a small black notch in the middle of the menu bar. Hover over it the same way.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Live activities (while the notch is closed)") {
                 Toggle("Now playing: artwork and waveform", isOn: $musicActivity)
                 Toggle("Lyrics under the notch while a song plays", isOn: $lyrics)
@@ -55,16 +75,26 @@ struct GeneralSettings: View {
                 Toggle("Upcoming meeting: 10-minute countdown", isOn: $eventActivity)
                 Toggle("Charging: shown when you plug in", isOn: $chargingActivity)
                 Toggle("AirPods and headphones: battery when they connect", isOn: $headphonesActivity)
+                Toggle("Timer countdown", isOn: $timerActivity)
+                Toggle("Camera and microphone in use (click it to mute your mic)", isOn: $privacyActivity)
+                Toggle("Downloads: shown when one finishes", isOn: $downloadActivity)
                 Text("Click the sides of a live activity, or swipe on it, to shrink it. Click or swipe the small version to bring it back.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Section("Tray") {
                 Toggle("Add new screenshots to the Tray automatically", isOn: $autoScreenshots)
+                Toggle("Add finished downloads to the Tray automatically", isOn: $autoDownloads)
                 Toggle("Keep clipboard history", isOn: $clipboardHistory)
                 Text("The last 30 things you copy, under Tray → Clipboard. Kept in memory only, never saved to disk; passwords from password managers are skipped.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Timer") {
+                Stepper("Pomodoro focus: \(pomodoroFocus) min", value: $pomodoroFocus, in: 5...90, step: 5)
+                Stepper("Pomodoro break: \(pomodoroBreak) min", value: $pomodoroBreak, in: 1...30)
+                Toggle("Start the next focus or break automatically", isOn: $pomodoroAuto)
+                Toggle("Play a sound when time's up", isOn: $timerSound)
             }
             Section("Weather") {
                 Toggle("Show the weather next to the battery", isOn: $weatherEnabled)
@@ -103,6 +133,67 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Connects Claude Code: two hooks in ~/.claude/settings.json send its permission questions and
+/// "finished" moments to the notch.
+struct ClaudeSettings: View {
+    let claude: ClaudeBridge
+    @AppStorage(Prefs.claudeAlerts) private var enabled = true
+    @AppStorage(Prefs.claudeWait) private var wait = 60
+    @State private var installed = ClaudeHooks.isInstalled()
+    @State private var message: String?
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Show Claude Code in the notch", isOn: $enabled)
+                Text("When Claude Code needs permission to run something, the notch shows what it wants to do with Allow and Deny. When it finishes, the notch tells you; click it to jump back.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Connect Claude Code") {
+                HStack {
+                    Label(installed ? "Connected" : "Not connected",
+                          systemImage: installed ? "checkmark.circle.fill" : "circle.dashed")
+                        .foregroundStyle(installed ? Color.green : Color.secondary)
+                    Spacer()
+                    if installed {
+                        Button("Disconnect") { run { try ClaudeHooks.uninstall() } }
+                    } else {
+                        Button("Connect") { run { try ClaudeHooks.install(port: claude.port) } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                Text("Adds two small hooks to ~/.claude/settings.json (a copy of the original is kept next to it as settings.json.notchnest-backup). Claude Code sessions you start afterwards use them. If NotchNest isn't running, Claude Code just asks in the terminal as usual.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let message { Text(message).font(.caption).foregroundStyle(.red) }
+                if let problem = claude.problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            }
+            Section("Answering") {
+                Stepper("Wait for an answer in the notch: \(wait) s", value: $wait, in: 15...300, step: 15)
+                Text("After that, or if you click Terminal, Claude Code asks in its own window instead. If the app Claude Code runs in is already in front, the notch stays out of the way and you answer there.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { installed = ClaudeHooks.isInstalled() }
+    }
+
+    private func run(_ change: () throws -> Void) {
+        do {
+            try change()
+            message = nil
+        } catch {
+            message = "Couldn't update ~/.claude/settings.json: \(error.localizedDescription)"
+        }
+        installed = ClaudeHooks.isInstalled()
     }
 }
 

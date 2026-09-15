@@ -177,6 +177,18 @@ struct TrayItemView: View {
         if targets.contains(where: { TextRecognizer.canRead($0.url) }) {
             menu.addItem(ClosureMenuItem("Copy Text") { tray.copyText(from: targets) })
         }
+        let images = targets.filter { FileTools.isImage($0.url) }
+        if !images.isEmpty {
+            let convert = NSMenuItem(title: images.count > 1 ? "Convert \(images.count) Images to" : "Convert to",
+                                     action: nil, keyEquivalent: "")
+            let formats = NSMenu()
+            for format in FileTools.ImageFormat.allCases where images.contains(where: { !format.matches($0.url) }) {
+                formats.addItem(ClosureMenuItem(format.title) { tray.convert(images, to: format) })
+            }
+            convert.submenu = formats
+            menu.addItem(convert)
+        }
+        menu.addItem(ClosureMenuItem(targets.count > 1 ? "Zip \(targets.count) Items" : "Zip") { tray.zip(targets) })
         menu.addItem(ClosureMenuItem("AirDrop\(count)") { AirDrop.send(urls) })
         menu.addItem(.separator())
         menu.addItem(ClosureMenuItem("Remove\(count) from Tray") { for target in targets { tray.remove(target) } })

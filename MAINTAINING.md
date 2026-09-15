@@ -15,7 +15,9 @@ open build/NotchNest.app
 
 Debug helpers:
 - `build/NotchNest.app/Contents/MacOS/NotchNest --selftest` feeds the notch synthetic clicks and drags and checks the results.
-- `… --snapshot <dir>` renders the notch's states to PNGs.
+- `… --featuretest` checks the timer, the Claude Code bridge and hooks (on port 47824 and a temporary settings file), notch placement for other screens, clipboard actions, Convert/Zip and download detection, all in temporary folders.
+- `open -W -n build/NotchNest.app --args --cameratest` flips the Mirror on and off 12 times (results in `cameratest.log`).
+- `… --snapshot <dir>` renders the notch's states to PNGs, including the timer, Claude Code, download and no-notch-screen states.
 - `~/Library/Application Support/NotchNest/activity.log` records what the notch did.
 
 ## Publishing an update

@@ -62,7 +62,11 @@ struct MediaWidget: View {
                     .onTapGesture { media.openPlayerApp() }
                     .help("Open \(media.appName)")
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(media.displayTitle).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(media.displayTitle).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        Spacer(minLength: 0)
+                        OutputButton()
+                    }
                     Text(media.subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 0)
                     ProgressRow(media: media)
@@ -82,7 +86,37 @@ struct MediaWidget: View {
                 Text("Nothing playing").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topTrailing) { OutputButton() }
         }
+    }
+}
+
+/// Where sound plays: click for a menu of speakers, headphones and displays.
+struct OutputButton: View {
+    var body: some View {
+        let current = AudioOutput.current
+        Button { showMenu() } label: {
+            Image(systemName: current?.symbol ?? "hifispeaker.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Sound output: \(current?.name ?? "none")")
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+        let current = AudioOutput.current
+        menu.addItem(NSMenuItem.sectionHeader(title: "Sound Output"))
+        for output in AudioOutput.all() {
+            let item = ClosureMenuItem(output.name) { AudioOutput.select(output) }
+            item.state = output.id == current?.id ? .on : .off
+            item.image = NSImage(systemSymbolName: output.symbol, accessibilityDescription: nil)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 }
 

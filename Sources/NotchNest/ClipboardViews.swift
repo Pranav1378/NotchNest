@@ -122,6 +122,12 @@ struct ClipboardShelf: View {
     @ViewBuilder private func menu(for item: ClipItem) -> some View {
         let targets = clipboard.selection.contains(item.id) ? clipboard.selectedItems : [item]
         let count = targets.count > 1 ? " \(targets.count) Clips" : ""
+        if targets.count == 1, let url = item.linkURL {
+            Button("Open Link") { NSWorkspace.shared.open(url) }
+        }
+        if targets.count == 1, let email = item.emailAddress {
+            Button("New Email to \(email)") { ClipActions.email(email) }
+        }
         Button("Copy\(count)") { clipboard.copy(targets) }
         if targets.contains(where: { !$0.isText }) {
             Button("Add to Tray") {
@@ -157,8 +163,12 @@ struct ClipCard: View {
                     .font(.system(size: 8))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                if item.isLink {
-                    Image(systemName: "link").font(.system(size: 8)).foregroundStyle(.secondary)
+                if let url = item.linkURL {
+                    ActionChip(title: "Open", symbol: "safari") { NSWorkspace.shared.open(url) }
+                        .help(url.absoluteString)
+                } else if let email = item.emailAddress {
+                    ActionChip(title: "Email", symbol: "envelope") { ClipActions.email(email) }
+                        .help("New email to \(email)")
                 }
             }
         }
@@ -186,10 +196,21 @@ struct ClipCard: View {
     @ViewBuilder private var preview: some View {
         switch item.content {
         case .text(let text):
-            Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
-                .font(.system(size: 10))
-                .lineLimit(5)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if let color = item.swatch {
+                VStack(alignment: .leading, spacing: 5) {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(color)
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.white.opacity(0.15)))
+                    Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                }
+            } else {
+                Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .font(.system(size: 10))
+                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         case .image:
             if let image = item.preview {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
@@ -207,9 +228,83 @@ struct ClipCard: View {
     }
 }
 
+/// A small pill button on a clip card ("Open", "Email").
+struct ActionChip: View {
+    let title: String
+    let symbol: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 7, weight: .bold))
+                Text(title).font(.system(size: 8, weight: .semibold))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.white.opacity(0.16)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+@MainActor
+enum ClipActions {
+    static func email(_ address: String) {
+        if let url = URL(string: "mailto:\(address)") { NSWorkspace.shared.open(url) }
+    }
+}
+
+/// Reads colour codes people copy: #RGB, #RGBA, #RRGGBB, #RRGGBBAA, rgb(…) and rgba(…).
+enum ClipColor {
+    static func parse(_ text: String?) -> Color? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), text.count <= 40 else { return nil }
+        if text.hasPrefix("#") {
+            let hex = Array(text.dropFirst())
+            guard [3, 4, 6, 8].contains(hex.count), hex.allSatisfy(\.isHexDigit) else { return nil }
+            let pairs: [String] = hex.count <= 4 ? hex.map { "\($0)\($0)" }
+                                                 : stride(from: 0, to: hex.count, by: 2).map { String(hex[$0..<$0 + 2]) }
+            let values = pairs.compactMap { UInt8($0, radix: 16) }.map { Double($0) / 255 }
+            return Color(.sRGB, red: values[0], green: values[1], blue: values[2], opacity: values.count > 3 ? values[3] : 1)
+        }
+        let lower = text.lowercased()
+        guard lower.hasPrefix("rgb"), lower.hasSuffix(")"), let open = lower.firstIndex(of: "(") else { return nil }
+        let numbers = lower[lower.index(after: open)..<lower.index(before: lower.endIndex)]
+            .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "/" })
+            .compactMap { Double($0.trimmingCharacters(in: CharacterSet(charactersIn: "%"))) }
+        guard numbers.count == 3 || numbers.count == 4, numbers.prefix(3).allSatisfy({ (0...255).contains($0) }) else { return nil }
+        return Color(.sRGB, red: numbers[0] / 255, green: numbers[1] / 255, blue: numbers[2] / 255,
+                     opacity: numbers.count == 4 ? min(max(numbers[3] > 1 ? numbers[3] / 100 : numbers[3], 0), 1) : 1)
+    }
+}
+
 extension ClipItem {
     var isText: Bool { text != nil }
-    var isLink: Bool { text.map { $0.hasPrefix("http://") || $0.hasPrefix("https://") } ?? false }
+
+    private var trimmedText: String? {
+        text?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A copied web address (one link, nothing else).
+    var linkURL: URL? {
+        guard let text = trimmedText, text.count < 2048, !text.contains(where: \.isWhitespace) else { return nil }
+        if let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+           url.host != nil { return url }
+        if text.lowercased().hasPrefix("www."), let url = URL(string: "https://" + text), url.host != nil { return url }
+        return nil
+    }
+
+    /// A copied email address (just the address).
+    var emailAddress: String? {
+        guard let text = trimmedText,
+              text.range(of: #"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"#, options: .regularExpression) != nil
+        else { return nil }
+        return text
+    }
+
+    /// A copied colour code, shown as a swatch.
+    var swatch: Color? { ClipColor.parse(text) }
 
     /// What dragging the card out carries.
     var itemProvider: NSItemProvider {

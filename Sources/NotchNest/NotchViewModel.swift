@@ -5,7 +5,19 @@ enum NotchTab: String, CaseIterable { case nook, tray, tasks }
 
 enum TrayMode { case files, clipboard }
 
-enum LiveActivity: Equatable { case charging, headphones, music, event }
+enum LiveActivity: Equatable {
+    case charging, headphones, music, event, timer, timerDone, privacy, download, claudeAsk, claudeDone
+}
+
+struct DownloadNotice: Equatable {
+    let url: URL
+    var inTray: Bool
+}
+
+struct TimerAlert: Equatable {
+    let title: String
+    let detail: String
+}
 
 struct HeadphonesInfo: Equatable {
     let name: String
@@ -13,28 +25,71 @@ struct HeadphonesInfo: Equatable {
     var battery: Int?
 }
 
-/// Where the notch sits on the screen that has one (or a fake notch on screens without).
-struct NotchGeometry {
+/// Which screen the notch lives on when there's more than one.
+enum DisplayMode: String, CaseIterable {
+    /// The built-in screen with the notch; the main display when there's no notch (lid closed,
+    /// an older MacBook, a desktop Mac).
+    case notch
+    /// The display that has the menu bar in System Settings → Displays.
+    case primary
+    /// Whichever display the pointer is on; the notch moves over when you go there.
+    case pointer
+
+    var title: String {
+        switch self {
+        case .notch: return "Built-in display (with the notch)"
+        case .primary: return "Main display"
+        case .pointer: return "The display the pointer is on"
+        }
+    }
+
+    static var current: DisplayMode {
+        DisplayMode(rawValue: UserDefaults.standard.string(forKey: Prefs.displayMode) ?? "") ?? .notch
+    }
+}
+
+/// Where the notch sits: the real notch, or a notch-sized pill centred in the menu bar of a screen
+/// that has none (external displays, M1 Airs, a MacBook with its lid closed).
+struct NotchGeometry: Equatable {
     var notchSize: CGSize
     var notchMidX: CGFloat
     var screenTop: CGFloat
     var hasNotch: Bool
+    var screenFrame: CGRect
 
-    static func current() -> NotchGeometry {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.screens.first else {
-            return NotchGeometry(notchSize: CGSize(width: 185, height: 32), notchMidX: 756, screenTop: 982, hasNotch: false)
+    static func current(mouse: NSPoint = NSEvent.mouseLocation) -> NotchGeometry {
+        guard let screen = screen(for: DisplayMode.current, mouse: mouse) else {
+            return NotchGeometry(notchSize: CGSize(width: 185, height: 32), notchMidX: 756, screenTop: 982,
+                                 hasNotch: false, screenFrame: CGRect(x: 0, y: 0, width: 1512, height: 982))
         }
-        let frame = screen.frame
-        if screen.safeAreaInsets.top > 0,
-           let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+        return make(frame: screen.frame, visibleFrame: screen.visibleFrame, safeTop: screen.safeAreaInsets.top,
+                    leftArea: screen.auxiliaryTopLeftArea, rightArea: screen.auxiliaryTopRightArea)
+    }
+
+    static func screen(for mode: DisplayMode, mouse: NSPoint) -> NSScreen? {
+        let screens = NSScreen.screens
+        let notched = screens.first { $0.safeAreaInsets.top > 0 }
+        switch mode {
+        case .notch: return notched ?? screens.first
+        case .primary: return screens.first
+        case .pointer: return screens.first { $0.frame.insetBy(dx: 0, dy: -1).contains(mouse) } ?? notched ?? screens.first
+        }
+    }
+
+    /// The pure maths, so it can be checked for screens this Mac doesn't have.
+    static func make(frame: CGRect, visibleFrame: CGRect, safeTop: CGFloat,
+                     leftArea: CGRect?, rightArea: CGRect?) -> NotchGeometry {
+        if safeTop > 0, let left = leftArea, let right = rightArea {
             let width = frame.width - left.width - right.width
-            return NotchGeometry(notchSize: CGSize(width: width, height: screen.safeAreaInsets.top),
+            return NotchGeometry(notchSize: CGSize(width: width, height: safeTop),
                                  notchMidX: frame.minX + left.width + width / 2,
-                                 screenTop: frame.maxY, hasNotch: true)
+                                 screenTop: frame.maxY, hasNotch: true, screenFrame: frame)
         }
-        let menuBar = max(frame.maxY - screen.visibleFrame.maxY, 24)
-        return NotchGeometry(notchSize: CGSize(width: 180, height: menuBar),
-                             notchMidX: frame.midX, screenTop: frame.maxY, hasNotch: false)
+        // No notch: a pill as tall as the menu bar (24pt if it's set to hide).
+        let menuBar = frame.maxY - visibleFrame.maxY
+        let height = menuBar >= 20 ? min(menuBar, 32) : 24
+        return NotchGeometry(notchSize: CGSize(width: 180, height: height),
+                             notchMidX: frame.midX, screenTop: frame.maxY, hasNotch: false, screenFrame: frame)
     }
 }
 
@@ -61,6 +116,12 @@ final class NotchViewModel {
     var chargingFlash = false
     var headphones: HeadphonesInfo?
     var statusCardShown = false
+    var timerCardShown = false
+    var downloadNotice: DownloadNotice?
+    var timerAlert: TimerAlert?
+    var claudeDone: ClaudeFinished?
+    /// Mice, keyboards and headphones with batteries, loaded when the status card opens.
+    var bluetoothDevices: [BluetoothDevice] = []
     var composingEvent = false
     var eventDraft = ""
     var addingEvent = false
@@ -72,6 +133,8 @@ final class NotchViewModel {
     /// Live activities the user tucked away by clicking or swiping on them.
     private var hiddenPlaySession: Int?
     private var hiddenEventID: String?
+    private var hiddenTimerRun: UUID?
+    private var hiddenPrivacySession: Int?
 
     let media: MediaController
     let calendar: CalendarService
@@ -83,7 +146,16 @@ final class NotchViewModel {
     let lyrics: LyricsService
     let weather: WeatherService
     let stats: SystemStats
+    let timer: FocusTimer
+    let claude: ClaudeBridge
+    let privacy: PrivacyMonitor
+    let keepAwake: KeepAwake
     @ObservationIgnored var openSettings: () -> Void = {}
+    /// Whether the pointer is over the notch (set by NotchController); short notices wait for it to leave.
+    @ObservationIgnored var pointerInside: () -> Bool = { false }
+    @ObservationIgnored private var downloadWork: DispatchWorkItem?
+    @ObservationIgnored private var timerAlertWork: DispatchWorkItem?
+    @ObservationIgnored private var claudeDoneWork: DispatchWorkItem?
     /// Makes the panel key so a text field can take typing (set by NotchController).
     @ObservationIgnored var requestKeyboard: () -> Void = {}
     @ObservationIgnored private var flashWork: DispatchWorkItem?
@@ -94,7 +166,12 @@ final class NotchViewModel {
 
     init(media: MediaController, calendar: CalendarService, battery: BatteryMonitor, tray: TrayStore,
          camera: CameraMirror, tasks: TasksService, clipboard: ClipboardHistory, lyrics: LyricsService,
-         weather: WeatherService, stats: SystemStats) {
+         weather: WeatherService, stats: SystemStats, timer: FocusTimer, claude: ClaudeBridge,
+         privacy: PrivacyMonitor, keepAwake: KeepAwake) {
+        self.timer = timer
+        self.claude = claude
+        self.privacy = privacy
+        self.keepAwake = keepAwake
         self.media = media
         self.calendar = calendar
         self.battery = battery
@@ -109,6 +186,10 @@ final class NotchViewModel {
         battery.onPlugIn = { [weak self] in self?.flashCharging() }
         tray.announce = { [weak self] in self?.showToast($0) }
         clipboard.announce = { [weak self] in self?.showToast($0) }
+        timer.onFinish = { [weak self] in self?.timerFinished(title: $0, detail: $1) }
+        claude.onFinished = { [weak self] in self?.showClaudeDone($0) }
+        claude.onRequest = { [weak self] in self?.haptic(.levelChange) }
+        privacy.ignoreCamera = { [weak camera] in camera?.isRunning ?? false }
     }
 
     // MARK: Live activities
@@ -116,25 +197,51 @@ final class NotchViewModel {
     private var musicPlaying: Bool { media.isPlaying && media.hasTrack && Prefs.bool(Prefs.musicActivity) }
     private var upcomingEvent: CalEvent? { Prefs.bool(Prefs.eventActivity) ? calendar.imminentEvent : nil }
 
+    private var privacyShowing: Bool { Prefs.bool(Prefs.privacyActivity) && privacy.isActive }
+    private var timerShowing: Bool { Prefs.bool(Prefs.timerActivity) && timer.isActive }
+    var claudeRequest: ClaudeRequest? { claude.pending.first }
+
+    /// What the closed notch shows, most urgent first.
     var liveActivity: LiveActivity? {
+        if claudeRequest != nil { return .claudeAsk }
         if chargingFlash { return .charging }
+        if timerAlert != nil { return .timerDone }
         if headphones != nil { return .headphones }
+        if downloadNotice != nil { return .download }
+        if claudeDone != nil { return .claudeDone }
+        if privacyShowing && privacy.session != hiddenPrivacySession { return .privacy }
         if musicPlaying && media.playSession != hiddenPlaySession { return .music }
         if let event = upcomingEvent, event.id != hiddenEventID { return .event }
+        if timerShowing && timer.runID != hiddenTimerRun { return .timer }
         return nil
     }
 
     /// A tucked-away activity that's still going, shown small so it can be clicked back.
     var miniActivity: LiveActivity? {
         guard liveActivity == nil else { return nil }
+        if privacyShowing { return .privacy }
         if musicPlaying { return .music }
         if upcomingEvent != nil { return .event }
+        if timerShowing { return .timer }
         return nil
     }
+
+    /// A song and a timer at once: the countdown takes the waveform's place beside the artwork.
+    var timerBesideMusic: Bool { liveActivity == .music && timerShowing }
 
     var showsLyrics: Bool {
         liveActivity == .music && Prefs.bool(Prefs.lyrics)
             && lyrics.trackKey == media.trackIdentity && !lyrics.lines.isEmpty
+    }
+
+    /// The row under the notch: lyrics, Claude's question, a finished download or Claude's reply.
+    var detailHeight: CGFloat {
+        switch liveActivity {
+        case .music: return showsLyrics ? Self.lyricsHeight : 0
+        case .claudeAsk: return 36
+        case .download, .claudeDone: return 26
+        default: return 0
+        }
     }
 
     /// Size of the black shape, including the flared top corners.
@@ -143,7 +250,7 @@ final class NotchViewModel {
         let plain = geometry.notchSize.width + Self.closedFlare * 2
         let height = geometry.notchSize.height
         if liveActivity != nil {
-            return CGSize(width: plain + Self.wing * 2, height: height + (showsLyrics ? Self.lyricsHeight : 0))
+            return CGSize(width: plain + Self.wing * 2, height: height + detailHeight)
         }
         if miniActivity != nil { return CGSize(width: plain + Self.miniWing * 2, height: height) }
         return CGSize(width: plain, height: height)
@@ -169,6 +276,22 @@ final class NotchViewModel {
                 hiddenPlaySession = media.playSession
             case .event:
                 hiddenEventID = calendar.imminentEvent?.id
+            case .timer:
+                hiddenTimerRun = timer.runID
+            case .timerDone:
+                timerAlertWork?.cancel()
+                timerAlert = nil
+            case .privacy:
+                hiddenPrivacySession = privacy.session
+            case .download:
+                downloadWork?.cancel()
+                downloadNotice = nil
+            case .claudeAsk:
+                // Put away = answer in the terminal instead.
+                if let request = claudeRequest { claude.answer(request.id, .terminal) }
+            case .claudeDone:
+                claudeDoneWork?.cancel()
+                claudeDone = nil
             }
         }
         haptic(.alignment)
@@ -180,8 +303,84 @@ final class NotchViewModel {
         withAnimation(.notch) {
             hiddenPlaySession = nil
             hiddenEventID = nil
+            hiddenTimerRun = nil
+            hiddenPrivacySession = nil
         }
         haptic(.alignment)
+    }
+
+    // MARK: Short-lived notices
+
+    func downloadFinished(_ url: URL, inTray: Bool) {
+        if isOpen { showToast(inTray ? "Downloaded \(url.lastPathComponent) · added to the Tray" : "Downloaded \(url.lastPathComponent)") }
+        guard Prefs.bool(Prefs.downloadActivity) else { return }
+        withAnimation(.notch) { downloadNotice = DownloadNotice(url: url, inTray: inTray) }
+        haptic(.alignment)
+        endDownloadNotice(after: 7)
+    }
+
+    func addDownloadToTray() {
+        guard var notice = downloadNotice else { return }
+        tray.add([notice.url])
+        notice.inTray = true
+        withAnimation(.smooth(duration: 0.2)) { downloadNotice = notice }
+        endDownloadNotice(after: 2.5)
+    }
+
+    func revealDownload() {
+        guard let notice = downloadNotice else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([notice.url])
+    }
+
+    private func endDownloadNotice(after seconds: Double) {
+        downloadWork?.cancel()
+        downloadWork = later(seconds) { [weak self] in
+            guard let self else { return }
+            if self.pointerInside() { self.endDownloadNotice(after: 1.5) } else { withAnimation(.notch) { self.downloadNotice = nil } }
+        }
+    }
+
+    private func timerFinished(title: String, detail: String) {
+        if Prefs.bool(Prefs.timerSound) { NSSound(named: "Glass")?.play() }
+        haptic(.levelChange)
+        if isOpen { showToast("\(title) · \(detail)") }
+        withAnimation(.notch) { timerAlert = TimerAlert(title: title, detail: detail) }
+        timerAlertWork?.cancel()
+        timerAlertWork = later(6) { [weak self] in withAnimation(.notch) { self?.timerAlert = nil } }
+    }
+
+    private func showClaudeDone(_ done: ClaudeFinished) {
+        if isOpen { showToast("Claude finished · \(done.project)") }
+        withAnimation(.notch) { claudeDone = done }
+        endClaudeDone(after: 6)
+    }
+
+    private func endClaudeDone(after seconds: Double) {
+        claudeDoneWork?.cancel()
+        claudeDoneWork = later(seconds) { [weak self] in
+            guard let self else { return }
+            if self.pointerInside() { self.endClaudeDone(after: 1.5) } else { withAnimation(.notch) { self.claudeDone = nil } }
+        }
+    }
+
+    /// Brings forward the app Claude Code runs in (Terminal, iTerm, VS Code…).
+    func openClaudeHost(_ bundleID: String?) {
+        if let bundleID, let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
+            app.activate()
+        }
+        withAnimation(.notch) { claudeDone = nil }
+    }
+
+    func joinImminentEvent() {
+        guard let link = calendar.imminentEvent?.meetLink else { return }
+        ActivityLog.note("joining \(calendar.imminentEvent?.title ?? "meeting")")
+        NSWorkspace.shared.open(link)
+    }
+
+    private func later(_ seconds: Double, _ body: @escaping @MainActor () -> Void) -> DispatchWorkItem {
+        let work = DispatchWorkItem { MainActor.assumeIsolated { body() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+        return work
     }
 
     func headphonesConnected(_ name: String) {
@@ -238,6 +437,7 @@ final class NotchViewModel {
             isOpen = false
             composingEvent = false
             statusCardShown = false
+            timerCardShown = false
         }
         eventMessage = nil
         stats.setActive(false)
@@ -259,8 +459,22 @@ final class NotchViewModel {
     }
 
     func toggleStatusCard() {
-        withAnimation(.smooth(duration: 0.2)) { statusCardShown.toggle() }
+        withAnimation(.smooth(duration: 0.2)) {
+            statusCardShown.toggle()
+            if statusCardShown { timerCardShown = false }
+        }
         stats.setActive(statusCardShown)
+        if statusCardShown {
+            Task { bluetoothDevices = await HeadphoneBattery.connectedDevices() }
+        }
+    }
+
+    func toggleTimerCard() {
+        withAnimation(.smooth(duration: 0.2)) {
+            timerCardShown.toggle()
+            if timerCardShown { statusCardShown = false }
+        }
+        if timerCardShown { stats.setActive(false) }
     }
 
     // MARK: Quick-add event

@@ -83,6 +83,7 @@ All of these are optional. Say no and that one feature just won't work.
 | **Location** | Showing the weather next to the battery. Prefer not to? Type your city in Settings → General → Weather. |
 | **Camera** | The **Mirror** tile, only when you click it. |
 | **Keychain / "wants to use your confidential information"** | Remembering your Google sign-in. Click **Always Allow**. |
+| **Downloads folder** | Telling you when a download finishes (and optionally adding it to the Tray). Prefer not to? Turn off *Downloads* in Settings → General. |
 
 ---
 
@@ -111,6 +112,16 @@ To check yourself: **Settings → General → Check for Updates…**
 | Tray → **Clipboard** | Your last 30 copies. Click one to copy it again. ✕ deletes it. |
 | Click the ☁ weather / battery | Weather, battery health, CPU, memory and network speed |
 | Click the sides of a live activity (or swipe on it) | Shrinks it. Click or swipe again to bring it back. |
+| Click the ⏱ next to the battery | A timer (1–30 min presets or your own length) or a **Pomodoro** (25 min focus, 5 min break). The countdown stays in the notch while it's closed. |
+| Click the speaker icon next to the song | Switch where sound plays: speakers, AirPods, a monitor |
+| Click the battery → **Keep Awake** | Stops your screen from sleeping until you turn it off. The same card shows your Magic Mouse / Keyboard / AirPods battery. |
+| Tray → **Clipboard**: copied a link, email or colour | **Open** and **Email** buttons appear on the card; colour codes like `#ff8800` show as a swatch |
+| Right-click files in the Tray → **Convert to** / **Zip** | Turns images into JPEG, PNG or HEIC, or zips the selection. The new file lands in the Tray. |
+| A download finishes | The notch shows it with **Add to Tray** |
+| On a call, the notch shows 🎤 / 📷 | Something is using your mic or camera. Click it to **mute your mic** (it unmutes by itself when the call ends). |
+| A meeting with a video link is coming up | Click **Join** in the notch |
+| Using Claude Code? | Settings → **Claude Code** → **Connect**. When Claude needs permission, the notch shows **Allow / Deny**; when it finishes, the notch tells you. |
+| More than one screen | Settings → General → **Displays**: keep the notch on your MacBook, on your main monitor, or have it follow your pointer. Screens without a notch get a small black one in the menu bar. |
 
 Every feature can be switched off in **Settings → General**.
 
@@ -127,6 +138,8 @@ Every feature can be switched off in **Settings → General**.
 | **No weather** | Allow Location when asked, or type your city in Settings → General → Weather. |
 | **Calendar is empty** | Sign in under Settings → Google, and make sure your calendars are ticked under *Calendars shown in the notch*. |
 | **The notch won't open** | Right-click the notch → Quit, then open NotchNest from Applications again. |
+| **I can't find it on my external monitor** | By default it stays on the MacBook's screen. Settings → General → Displays → *The display the pointer is on*. |
+| **Claude Code still asks in the terminal** | That's expected when the terminal is already in front, or after the wait time in Settings → Claude Code. After clicking Connect, start a new Claude Code session. |
 
 **Uninstalling:** right-click the notch → **Quit NotchNest**, then drag NotchNest from Applications to the Trash.
 

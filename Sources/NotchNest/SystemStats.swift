@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import IOKit
+import IOKit.pwr_mgt
 
 struct SystemSnapshot {
     var cpu: Double?          // 0…1
@@ -141,6 +142,34 @@ final class SystemStats {
                                                 info?["sppower_battery_cycle_count"] as? Int))
             }
         }
+    }
+}
+
+/// Keeps the Mac and its display awake (like `caffeinate -d`) until turned off or the app quits.
+@Observable @MainActor
+final class KeepAwake {
+    private(set) var isOn = false
+    @ObservationIgnored private var assertion = IOPMAssertionID(0)
+
+    func toggle() { if isOn { off() } else { on() } }
+
+    func on() {
+        guard !isOn else { return }
+        var id = IOPMAssertionID(0)
+        let result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                                                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                                 "NotchNest Keep Awake" as CFString, &id)
+        guard result == kIOReturnSuccess else { return }
+        assertion = id
+        isOn = true
+        ActivityLog.note("keep awake on")
+    }
+
+    func off() {
+        guard isOn else { return }
+        IOPMAssertionRelease(assertion)
+        isOn = false
+        ActivityLog.note("keep awake off")
     }
 }
 
