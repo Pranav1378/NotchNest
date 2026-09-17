@@ -154,10 +154,12 @@ final class CalendarService {
     // MARK: Fetching
 
     func refresh() async {
-        guard !isLoading else { return }
+        // Apple's events are local and instant, so load them even while Google is still loading
+        // (a Google refresh in flight used to swallow this one).
         let window = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: .now))!
         appleEvents = apple.events(from: window, to: Calendar.current.date(byAdding: .day, value: 8, to: window)!)
         combine()
+        guard !isLoading else { return }
         guard googleShown else {
             if !events.isEmpty {
                 events = []
@@ -216,7 +218,14 @@ final class CalendarService {
     private func combine() {
         combined = Self.merge(google: events, apple: appleEvents)
         updateImminent()
+        let summary = "calendar shows \(combined.count) event(s): google \(events.count), apple \(appleEvents.count), \(events.count + appleEvents.count - combined.count) duplicate(s) skipped"
+        if summary != lastSummary {
+            lastSummary = summary
+            ActivityLog.note(summary)
+        }
     }
+
+    @ObservationIgnored private var lastSummary = ""
 
     /// A calendar added both to Google and to the Mac's Calendar app shouldn't show its events twice.
     static func merge(google: [CalEvent], apple: [CalEvent]) -> [CalEvent] {

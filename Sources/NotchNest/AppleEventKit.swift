@@ -8,7 +8,8 @@ import SwiftUI
 final class AppleEventKit {
     nonisolated static let listPrefix = "apple:"
 
-    @ObservationIgnored let store = EKEventStore()
+    /// Replaced after macOS grants access: a store opened before that keeps seeing no calendars.
+    @ObservationIgnored private(set) var store = EKEventStore()
     private(set) var eventsStatus = EKEventStore.authorizationStatus(for: .event)
     private(set) var remindersStatus = EKEventStore.authorizationStatus(for: .reminder)
     @ObservationIgnored private var handlers: [() -> Void] = []
@@ -43,7 +44,7 @@ final class AppleEventKit {
 
     init() {
         // Edits made in Calendar or Reminders (or synced from iCloud) show up in the notch.
-        NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.changed() }
         }
     }
@@ -64,6 +65,7 @@ final class AppleEventKit {
     func requestCalendarAccess() async -> Bool {
         let granted = (try? await store.requestFullAccessToEvents()) ?? false
         ActivityLog.note("apple calendar access: \(granted)")
+        if granted { store = EKEventStore() }
         changed()
         return granted
     }
@@ -71,6 +73,7 @@ final class AppleEventKit {
     func requestRemindersAccess() async -> Bool {
         let granted = (try? await store.requestFullAccessToReminders()) ?? false
         ActivityLog.note("apple reminders access: \(granted)")
+        if granted { store = EKEventStore() }
         changed()
         return granted
     }
@@ -79,10 +82,25 @@ final class AppleEventKit {
 
     func events(from start: Date, to end: Date) -> [CalEvent] {
         guard calendarReady else { return [] }
-        let shown = store.calendars(for: .event).filter { isShown($0.calendarIdentifier) }
-        guard !shown.isEmpty else { return [] }
+        let all = store.calendars(for: .event)
+        let shown = all.filter { isShown($0.calendarIdentifier) }
+        guard !shown.isEmpty else {
+            logCounts("apple calendar: \(all.count) calendar(s), none shown")
+            return []
+        }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: shown)
-        return store.events(matching: predicate).compactMap(Self.makeEvent)
+        let events = store.events(matching: predicate).compactMap(Self.makeEvent)
+        logCounts("apple calendar: \(events.count) event(s) from \(shown.count) of \(all.count) calendar(s)")
+        return events
+    }
+
+    @ObservationIgnored private var lastCounts = ""
+
+    /// Logs only when the numbers change, so the 5-minute refresh doesn't fill the log.
+    private func logCounts(_ line: String) {
+        guard line != lastCounts else { return }
+        lastCounts = line
+        ActivityLog.note(line)
     }
 
     static func makeEvent(_ event: EKEvent) -> CalEvent? {
