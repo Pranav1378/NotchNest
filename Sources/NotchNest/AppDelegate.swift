@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             stats: SystemStats(), timer: FocusTimer(), claude: claude, privacy: privacy,
                             keepAwake: keepAwake)
         vm.openSettings = { [weak self] in self?.showSettings() }
+        UsagePages.announce = { [weak self] message in self?.vm.showToast(message) }
 
         media.start()
         battery.start()

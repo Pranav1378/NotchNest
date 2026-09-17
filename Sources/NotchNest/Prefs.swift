@@ -62,6 +62,11 @@ enum Prefs {
     static let autoDownloads = "autoDownloads"
     static let claudeAlerts = "claudeAlerts"
     static let claudeWait = "claudeWait"
+    static let claudeUsage = "claudeUsage"
+    static let geminiUsage = "geminiUsage"
+    static let claudeUsageButton = "claudeUsageButton"
+    static let claudeUsageInApp = "claudeUsageInApp"
+    static let usageInAppWindow = "usageInAppWindow"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -72,6 +77,12 @@ enum Prefs {
             timerActivity: true, timerSound: true, pomodoroFocus: 25, pomodoroBreak: 5, pomodoroAuto: true,
             privacyActivity: true, downloadActivity: true, autoDownloads: false,
             claudeAlerts: true, claudeWait: 60,
+            // On for people who have the Gemini app.
+            geminiUsage: FileManager.default.fileExists(atPath: "/Applications/Gemini.app"),
+            claudeUsageButton: FileManager.default.fileExists(atPath: "/Applications/Claude.app"),
+            // Claude's usage page opens in the Claude app when it's installed, as that app's own
+            // usage window (which needs Accessibility permission) when it can.
+            claudeUsageInApp: true, usageInAppWindow: true,
         ])
     }
 

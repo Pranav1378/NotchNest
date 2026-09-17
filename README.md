@@ -58,11 +58,11 @@ The Settings window opens by itself the first time.
 
 ### Step 6: Connect your Google account (for Calendar and Tasks)
 
-> 📩 **First, text Pranav the Gmail address you want to use.** Google only lets approved accounts sign in to NotchNest, so he has to add you. Otherwise you'll see "Access blocked".
+> ✅ **No invite needed.** Any Google account can sign in; nobody has to add you first.
 
 1. In **Settings → Google**, click **Sign in with Google**. Your web browser opens.
 2. Pick your Google account.
-3. You may see **"Google hasn't verified this app"**. That's expected for small apps shared between friends. Click **Advanced** → **Go to NotchNest (unsafe)**.
+3. You'll see **"Google hasn't verified this app"**. That's expected for a small app like this one, which Google hasn't put through its review. Click **Advanced** → **Go to NotchNest (unsafe)**. NotchNest only reads your own calendar and tasks.
 4. Tick the boxes to allow **Calendar** and **Tasks**, then click **Continue**.
 5. The browser says **"NotchNest is connected"**. Close that tab.
 
@@ -83,6 +83,7 @@ All of these are optional. Say no and that one feature just won't work.
 | **Location** | Showing the weather next to the battery. Prefer not to? Type your city in Settings → General → Weather. |
 | **Camera** | The **Mirror** tile, only when you click it. |
 | **Keychain / "wants to use your confidential information"** | Remembering your Google sign-in. Click **Always Allow**. |
+| **Accessibility** | Only for the ✦ / ✨ usage buttons: it lets NotchNest press ⌘, in Claude or Gemini and click Usage, so their usage window opens over what you're doing. Say no and the buttons open the usage page in your browser instead. |
 | **Downloads folder** | Telling you when a download finishes (and optionally adding it to the Tray). Prefer not to? Turn off *Downloads* in Settings → General. |
 
 ---
@@ -120,7 +121,8 @@ To check yourself: **Settings → General → Check for Updates…**
 | A download finishes | The notch shows it with **Add to Tray** |
 | On a call, the notch shows 🎤 / 📷 | Something is using your mic or camera. Click it to **mute your mic** (it unmutes by itself when the call ends). |
 | A meeting with a video link is coming up | Click **Join** in the notch |
-| Using Claude Code? | Settings → **Claude Code** → **Connect**. When Claude needs permission, the notch shows **Allow / Deny**; when it finishes, the notch tells you. |
+| Using Claude Code? | Settings → **Claude & Gemini** → **Connect**. When Claude needs permission, the notch shows **Allow / Deny**; when it finishes, the notch tells you. |
+| Check your AI usage | Click **✦** (Claude) or **✨** (Gemini) in the notch's top bar. With Accessibility permission, each app's own usage window opens over what you're doing; otherwise the usage page opens in your browser. Switch the buttons on or off in Settings → Claude & Gemini. |
 | More than one screen | Settings → General → **Displays**: keep the notch on your MacBook, on your main monitor, or have it follow your pointer. Screens without a notch get a small black one in the menu bar. |
 
 Every feature can be switched off in **Settings → General**.
@@ -133,7 +135,7 @@ Every feature can be switched off in **Settings → General**.
 |---|---|
 | **I opened it and nothing happened** | That's normal: there's no window. Point at the notch. |
 | **"NotchNest is damaged and can't be opened"** | Open **Terminal** and paste `xattr -dr com.apple.quarantine /Applications/NotchNest.app`, press Return, then open NotchNest again. |
-| **"Access blocked" when signing in to Google** | Pranav hasn't added your Gmail yet. Text him the address and try again later. |
+| **"Access blocked" when signing in to Google** | Sign in with a personal Google account. Work and school accounts are often blocked by whoever manages them. |
 | **Music isn't showing** | Press play in Spotify/Music. Some websites don't share the song or video name, so it shows as *"Arc media"* or *"Safari media"*. |
 | **No weather** | Allow Location when asked, or type your city in Settings → General → Weather. |
 | **Calendar is empty** | Sign in under Settings → Google, and make sure your calendars are ticked under *Calendars shown in the notch*. |

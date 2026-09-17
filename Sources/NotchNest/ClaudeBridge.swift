@@ -19,6 +19,50 @@ struct ClaudeFinished: Equatable {
     let hostApp: String?
 }
 
+/// Your Claude plan's usage, exactly as Claude Code reports it to its status line: the rolling
+/// 5-hour session window and the weekly window, each with a percentage and a reset time.
+struct ClaudeUsage: Codable, Equatable {
+    struct Window: Codable, Equatable {
+        var used: Double
+        var resetsAt: Date
+    }
+
+    var session: Window?
+    var week: Window?
+    var model: String?
+    var updated: Date
+
+    static func from(_ json: [String: Any], now: Date = .now) -> ClaudeUsage? {
+        guard let limits = json["rate_limits"] as? [String: Any] else { return nil }
+        func window(_ key: String) -> Window? {
+            guard let entry = limits[key] as? [String: Any],
+                  let used = (entry["used_percentage"] as? NSNumber)?.doubleValue,
+                  let reset = (entry["resets_at"] as? NSNumber)?.doubleValue else { return nil }
+            return Window(used: used, resetsAt: Date(timeIntervalSince1970: reset))
+        }
+        let session = window("five_hour")
+        let week = window("seven_day")
+        guard session != nil || week != nil else { return nil }
+        return ClaudeUsage(session: session, week: week,
+                           model: (json["model"] as? [String: Any])?["display_name"] as? String, updated: now)
+    }
+
+    /// The one-line summary Claude Code's own status line shows (NotchNest answers the status line
+    /// request with it).
+    static func statusLine(_ json: [String: Any], usage: ClaudeUsage?) -> String {
+        var parts: [String] = []
+        if let model = (json["model"] as? [String: Any])?["display_name"] as? String { parts.append(model) }
+        if let context = ((json["context_window"] as? [String: Any])?["used_percentage"] as? NSNumber)?.doubleValue {
+            parts.append("context \(Int(context.rounded()))%")
+        }
+        if let session = usage?.session {
+            parts.append("session \(Int(session.used.rounded()))% (resets \(session.resetsAt.formatted(date: .omitted, time: .shortened)))")
+        }
+        if let week = usage?.week { parts.append("week \(Int(week.used.rounded()))%") }
+        return parts.joined(separator: " · ")
+    }
+}
+
 /// Receives Claude Code's hooks on a local port. The hooks (see `ClaudeHooks`) are one `curl`
 /// each: PermissionRequest waits for the answer given in the notch, Stop just reports in.
 /// When NotchNest isn't running, curl fails quietly and Claude Code asks in the terminal as usual.
@@ -30,13 +74,35 @@ final class ClaudeBridge {
 
     private(set) var pending: [ClaudeRequest] = []
     private(set) var problem: String?
+    /// The latest plan usage Claude Code reported (kept between launches).
+    private(set) var usage: ClaudeUsage?
+    /// Whether NotchNest's hooks are in Claude Code's settings (Settings → Claude Code → Connect).
+    private(set) var connected = ClaudeHooks.isInstalled()
     let port: UInt16
+
+    func refreshConnected() { connected = ClaudeHooks.isInstalled() }
     @ObservationIgnored var onRequest: () -> Void = {}
     @ObservationIgnored var onFinished: (ClaudeFinished) -> Void = { _ in }
     @ObservationIgnored private var listener: NWListener?
     @ObservationIgnored private var waiting: [UUID: NWConnection] = [:]
 
-    init(port: UInt16 = defaultPort) { self.port = port }
+    init(port: UInt16 = defaultPort) {
+        self.port = port
+        // Test runs use their own port and don't read or write the saved usage.
+        if port == Self.defaultPort, let data = UserDefaults.standard.data(forKey: Prefs.claudeUsage) {
+            usage = try? JSONDecoder().decode(ClaudeUsage.self, from: data)
+        }
+    }
+
+    private func record(_ usage: ClaudeUsage) {
+        if usage.session?.used != self.usage?.session?.used || usage.week?.used != self.usage?.week?.used {
+            ActivityLog.note("claude usage: session \(usage.session.map { "\(Int($0.used))%" } ?? "–"), week \(usage.week.map { "\(Int($0.used))%" } ?? "–")")
+        }
+        self.usage = usage
+        if port == Self.defaultPort, let data = try? JSONEncoder().encode(usage) {
+            UserDefaults.standard.set(data, forKey: Prefs.claudeUsage)
+        }
+    }
 
     func start() {
         guard listener == nil else { return }
@@ -124,6 +190,9 @@ final class ClaudeBridge {
         case "/claude/stop":
             respond(connection, body: "")
             finished(json, host: host)
+        case "/claude/status":
+            if let usage = ClaudeUsage.from(json) { record(usage) }
+            respond(connection, body: ClaudeUsage.statusLine(json, usage: ClaudeUsage.from(json)), type: "text/plain")
         default:
             respond(connection, status: "404 Not Found", body: "")
         }
@@ -174,9 +243,10 @@ final class ClaudeBridge {
         onFinished(ClaudeFinished(project: Self.project(json), message: message, hostApp: host))
     }
 
-    private func respond(_ connection: NWConnection, status: String = "200 OK", body: String) {
+    private func respond(_ connection: NWConnection, status: String = "200 OK", body: String,
+                         type: String = "application/json") {
         let bytes = Data(body.utf8)
-        let head = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: \(type); charset=utf-8\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
         connection.send(content: Data(head.utf8) + bytes, completion: .contentProcessed { _ in connection.cancel() })
     }
 
@@ -260,6 +330,49 @@ enum ClaudeHooks {
          ("Stop", command(path: "/claude/stop", port: port, maxTime: 3, quiet: true), 10)]
     }
 
+    /// The status line command: sends Claude Code's status data (which includes your plan usage) to
+    /// NotchNest and prints the line NotchNest sends back. Someone else's status line is kept: it
+    /// still gets the same data and still decides what's printed.
+    static func statusCommand(port: UInt16, wrapping existing: String?) -> String {
+        let send = "curl -s -m 1 -H 'Expect:' -H 'X-NotchNest: 1' --data-binary @- http://127.0.0.1:\(port)/claude/status 2>/dev/null"
+        guard let existing, !existing.isEmpty else { return "\(send) || true \(marker)" }
+        return "input=$(cat); printf '%s' \"$input\" | \(send) >/dev/null; \(wrapPrefix)\(existing)\(wrapSuffix)"
+    }
+
+    private static let wrapPrefix = "printf '%s' \"$input\" | { "
+    private static let wrapSuffix = " ; } \(marker)"
+
+    /// The status line that was there before NotchNest wrapped it, if any.
+    private static func unwrapped(_ command: String) -> String? {
+        guard command.hasSuffix(wrapSuffix), let start = command.range(of: wrapPrefix, options: .backwards) else { return nil }
+        return String(command[start.upperBound..<command.index(command.endIndex, offsetBy: -wrapSuffix.count)])
+    }
+
+    static func statusLineInstalled(at url: URL = settingsURL) -> Bool {
+        guard let root = try? load(url), let line = root["statusLine"] as? [String: Any] else { return false }
+        return (line["command"] as? String)?.contains(marker) == true
+    }
+
+    private static func installStatusLine(_ root: inout [String: Any], port: UInt16) {
+        var line = root["statusLine"] as? [String: Any] ?? [:]
+        let current = line["command"] as? String
+        let original = current.map { $0.contains(marker) ? unwrapped($0) : $0 } ?? nil
+        line["type"] = "command"
+        line["command"] = statusCommand(port: port, wrapping: original)
+        root["statusLine"] = line
+    }
+
+    private static func uninstallStatusLine(_ root: inout [String: Any]) {
+        guard var line = root["statusLine"] as? [String: Any], let command = line["command"] as? String,
+              command.contains(marker) else { return }
+        if let original = unwrapped(command) {
+            line["command"] = original
+            root["statusLine"] = line
+        } else {
+            root.removeValue(forKey: "statusLine")
+        }
+    }
+
     static func isInstalled(at url: URL = settingsURL) -> Bool {
         guard let root = try? load(url), let hooks = root["hooks"] as? [String: Any] else { return false }
         let groups = hooks["PermissionRequest"] as? [[String: Any]] ?? []
@@ -277,6 +390,7 @@ enum ClaudeHooks {
             hooks[entry.event] = groups
         }
         root["hooks"] = hooks
+        installStatusLine(&root, port: port)
         try save(root, to: url)
         ActivityLog.note("claude hooks installed in \(url.path)")
     }
@@ -285,6 +399,7 @@ enum ClaudeHooks {
         var root = try load(url)
         let hooks = stripped(root["hooks"] as? [String: Any] ?? [:])
         if hooks.isEmpty { root.removeValue(forKey: "hooks") } else { root["hooks"] = hooks }
+        uninstallStatusLine(&root)
         try save(root, to: url)
         ActivityLog.note("claude hooks removed from \(url.path)")
     }

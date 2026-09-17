@@ -69,6 +69,17 @@ enum Snapshot {
         if let id = vm.claudeRequest?.id { vm.claude.answer(id, .terminal) }
         _ = await asking.value
 
+        // Usage, as a status line update would bring it (it only feeds the ✦ tooltip now).
+        var status = URLRequest(url: URL(string: "http://127.0.0.1:\(vm.claude.port)/claude/status")!)
+        status.httpMethod = "POST"
+        status.setValue("1", forHTTPHeaderField: "X-NotchNest")
+        let now = Int(Date().timeIntervalSince1970)
+        status.httpBody = Data(#"{"rate_limits":{"five_hour":{"used_percentage":100,"resets_at":\#(now + 5400)},"seven_day":{"used_percentage":34,"resets_at":\#(now + 3 * 86400 + 7200)}}}"#.utf8)
+        _ = try? await URLSession.shared.data(for: status)
+        vm.isOpen = true
+        render(vm, name: "open-usage-icons", to: directory)
+        vm.isOpen = false
+
         // An external monitor: the pill in its menu bar.
         vm.geometry = NotchGeometry.make(frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
                                          visibleFrame: CGRect(x: 0, y: 0, width: 2560, height: 1415), safeTop: 0,

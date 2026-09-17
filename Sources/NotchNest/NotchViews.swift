@@ -96,6 +96,8 @@ struct NotchRootView: View {
 
 struct OpenNotchView: View {
     let vm: NotchViewModel
+    @AppStorage(Prefs.claudeUsageButton) private var claudeUsageButton = true
+    @AppStorage(Prefs.geminiUsage) private var geminiEnabled = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -146,6 +148,9 @@ struct OpenNotchView: View {
                 TrayModeSwitch(vm: vm).padding(.leading, 8).transition(.opacity)
             }
             Spacer()
+            // One click each: straight to Claude's or Gemini's usage page.
+            if claudeUsageButton { UsageIconButton(kind: .claude, claude: vm.claude) }
+            if geminiEnabled { UsageIconButton(kind: .gemini, claude: vm.claude) }
             TimerButton(vm: vm)
             StatusButton(vm: vm)
             Button(action: vm.openSettings) {

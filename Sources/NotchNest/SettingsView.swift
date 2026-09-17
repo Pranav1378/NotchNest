@@ -15,7 +15,7 @@ struct SettingsView: View {
             GeneralSettings(weather: weather, updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
             ClaudeSettings(claude: claude)
-                .tabItem { Label("Claude Code", systemImage: "sparkle") }
+                .tabItem { Label("Claude & Gemini", systemImage: "sparkle") }
         }
         .frame(width: 560, height: 620)
     }
@@ -142,14 +142,20 @@ struct ClaudeSettings: View {
     let claude: ClaudeBridge
     @AppStorage(Prefs.claudeAlerts) private var enabled = true
     @AppStorage(Prefs.claudeWait) private var wait = 60
+    @AppStorage(Prefs.geminiUsage) private var gemini = false
+    @AppStorage(Prefs.claudeUsageInApp) private var claudeInApp = true
+    @AppStorage(Prefs.claudeUsageButton) private var claudeButton = true
+    @AppStorage(Prefs.usageInAppWindow) private var inAppWindow = true
+    @State private var accessibility = AppAutomation.isTrusted
     @State private var installed = ClaudeHooks.isInstalled()
+    @State private var statusInstalled = ClaudeHooks.statusLineInstalled()
     @State private var message: String?
 
     var body: some View {
         Form {
             Section {
                 Toggle("Show Claude Code in the notch", isOn: $enabled)
-                Text("When Claude Code needs permission to run something, the notch shows what it wants to do with Allow and Deny. When it finishes, the notch tells you; click it to jump back.")
+                Text("When Claude Code needs permission to run something, the notch shows what it wants to do with Allow and Deny. When it finishes, the notch tells you; click it to jump back. The ✦ in the notch shows your plan's session and weekly usage, as Claude Code reports it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -160,6 +166,10 @@ struct ClaudeSettings: View {
                           systemImage: installed ? "checkmark.circle.fill" : "circle.dashed")
                         .foregroundStyle(installed ? Color.green : Color.secondary)
                     Spacer()
+                    if installed && !statusInstalled {
+                        Button("Add live usage") { run { try ClaudeHooks.install(port: claude.port) } }
+                            .buttonStyle(.borderedProminent)
+                    }
                     if installed {
                         Button("Disconnect") { run { try ClaudeHooks.uninstall() } }
                     } else {
@@ -167,12 +177,54 @@ struct ClaudeSettings: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
-                Text("Adds two small hooks to ~/.claude/settings.json (a copy of the original is kept next to it as settings.json.notchnest-backup). Claude Code sessions you start afterwards use them. If NotchNest isn't running, Claude Code just asks in the terminal as usual.")
+                Text("Adds two small hooks and a status line to ~/.claude/settings.json (a copy of the original is kept next to it as settings.json.notchnest-backup). If you already have a status line, it keeps working. Claude Code sessions you start afterwards use them. If NotchNest isn't running, Claude Code just asks in the terminal as usual.\n\nLive usage needs a recent Claude Code: run `claude update` in Terminal if the ✦ doesn't appear. It updates after each reply while a session runs.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let message { Text(message).font(.caption).foregroundStyle(.red) }
                 if let problem = claude.problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            }
+            Section("Usage buttons") {
+                Toggle("✦ Claude usage button in the notch", isOn: $claudeButton)
+                Toggle("Open Claude's usage in the Claude app", isOn: $claudeInApp)
+                    .disabled(!claudeButton || !UsagePages.hasClaudeApp)
+                Text(UsagePages.hasClaudeApp
+                     ? "On: ✦ opens Settings → Usage in the Claude desktop app. Off: claude.ai/settings/usage in your browser."
+                     : "The Claude desktop app isn't installed, so the usage page opens in your browser.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("✨ Gemini usage button in the notch", isOn: $gemini)
+                Text("Opens gemini.google.com/usage: your 5-hour and weekly Gemini limits.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Open each app's own usage window") {
+                Toggle("Show usage inside Claude and Gemini, over what you're doing", isOn: $inAppWindow)
+                Text("NotchNest does what you'd do: brings the app forward, presses ⌘, and clicks Usage. Your chat stays where it was. This needs Accessibility permission, and falls back to the usage page when it can't.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Label(accessibility ? "Accessibility allowed" : "Accessibility not allowed",
+                          systemImage: accessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(accessibility ? Color.green : Color.orange)
+                    Spacer()
+                    if !accessibility {
+                        Button("Allow…") {
+                            AppAutomation.requestTrust()
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    Button("Re-check") { accessibility = AppAutomation.isTrusted }
+                }
+                if !accessibility {
+                    Text("Turn NotchNest on in System Settings → Privacy & Security → Accessibility, then press Re-check.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Section("Answering") {
                 Stepper("Wait for an answer in the notch: \(wait) s", value: $wait, in: 15...300, step: 15)
@@ -183,7 +235,7 @@ struct ClaudeSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { installed = ClaudeHooks.isInstalled() }
+        .onAppear { refresh() }
     }
 
     private func run(_ change: () throws -> Void) {
@@ -193,7 +245,14 @@ struct ClaudeSettings: View {
         } catch {
             message = "Couldn't update ~/.claude/settings.json: \(error.localizedDescription)"
         }
+        refresh()
+    }
+
+    private func refresh() {
+        accessibility = AppAutomation.isTrusted
         installed = ClaudeHooks.isInstalled()
+        statusInstalled = ClaudeHooks.statusLineInstalled()
+        claude.refreshConnected()
     }
 }
 

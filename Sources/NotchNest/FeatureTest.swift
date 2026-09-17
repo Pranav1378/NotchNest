@@ -16,6 +16,7 @@ enum FeatureTest {
             await timer()
             await claude(vm: vm)
             await clicks(vm: vm, notch: notch)
+            await accessibility()
             hooks()
             log("done")
             exit(0)
@@ -253,6 +254,28 @@ enum FeatureTest {
         log("claude: Stop → \(vm.liveActivity.map { "\($0)" } ?? "nothing") “\(vm.claudeDone?.message ?? "")” · \(vm.claudeDone?.project ?? "") hook output=“\(stopOutput)” (want claudeDone “All 25 checks pass.” · NotchNest, empty)")
         vm.openClaudeHost(nil)
 
+        // Usage, through the exact status line command, with the data Claude Code sends it.
+        let now = Date().timeIntervalSince1970
+        let status: [String: Any] = [
+            "model": ["display_name": "Opus 5"], "context_window": ["used_percentage": 23],
+            "rate_limits": ["five_hour": ["used_percentage": 100, "resets_at": now + 3600],
+                            "seven_day": ["used_percentage": 34, "resets_at": now + 3 * 86_400]],
+        ]
+        let statusCommand = ClaudeHooks.statusCommand(port: port, wrapping: nil)
+        let printed = await Task.detached { shell(statusCommand, input: status) }.value
+        let usage = bridge.usage
+        log("claude usage: session \(usage?.session.map { "\(Int($0.used))%" } ?? "none"), week \(usage?.week.map { "\(Int($0.used))%" } ?? "none") (want 100%, 34%)")
+        log("claude usage headline: “\(usage?.headline(at: Date()) ?? "")” (want Session limit reached…)")
+        log("claude status line prints “\(printed)” (want Opus 5 · context 23% · session 100% (resets …) · week 34%)")
+        let noLimits = await Task.detached { shell(statusCommand, input: ["model": ["display_name": "Sonnet 5"]]) }.value
+        log("claude status line without usage: “\(noLimits)”, usage kept=\(bridge.usage?.week?.used == 34) (want Sonnet 5, true)")
+        var onPace = usage
+        onPace?.session = nil
+        onPace?.week = ClaudeUsage.Window(used: 34, resetsAt: Date().addingTimeInterval(6 * 86_400))
+        log("claude usage headline at 34% with 6 of 7 days left: “\(onPace?.headline(at: Date()) ?? "")” (want Going faster than usual…)")
+        onPace?.week = ClaudeUsage.Window(used: 34, resetsAt: Date().addingTimeInterval(86_400))
+        log("claude usage headline at 34% with 1 day left: “\(onPace?.headline(at: Date()) ?? "")” (want On track…)")
+
         // NotchNest not running: the hook must stay silent so Claude Code asks normally.
         let offline = ClaudeHooks.command(path: "/claude/permission", port: 1, maxTime: 2, quiet: false)
         let offlineOutput = await Task.detached { shell(offline, input: bash) }.value
@@ -326,6 +349,47 @@ enum FeatureTest {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
+    // MARK: Clicking another app's Usage item
+
+    /// The same search that finds "Usage" in Claude or "Usage limits" in Gemini, run against a
+    /// window of NotchNest's own so no other app is touched.
+    private static func accessibility() async {
+        log("accessibility permission: \(AppAutomation.isTrusted) (want true, or the usage buttons fall back to the web page)")
+        guard AppAutomation.isTrusted else { return }
+        var clicked = false
+        let button = TestButton(title: "Usage limits") { clicked = true }
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 320, height: 120),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView?.addSubview(button)
+        button.frame = NSRect(x: 40, y: 40, width: 160, height: 32)
+        window.orderFrontRegardless()
+        try? await Task.sleep(for: .seconds(0.4))
+        let found = await withCheckedContinuation { continuation in
+            AXSearch.queue.async {
+                let result = AXSearch.pressItem(pid: ProcessInfo.processInfo.processIdentifier,
+                                                names: ["Usage limits"], until: Date().addingTimeInterval(3))
+                continuation.resume(returning: result)
+            }
+        }
+        try? await Task.sleep(for: .seconds(0.4))
+        log("found and clicked a “Usage limits” item: found=\(found) clicked=\(clicked) (want true, true)")
+        window.orderOut(nil)
+    }
+
+    private final class TestButton: NSButton {
+        private let onPress: () -> Void
+        init(title: String, onPress: @escaping () -> Void) {
+            self.onPress = onPress
+            super.init(frame: .zero)
+            self.title = title
+            bezelStyle = .rounded
+            target = self
+            action = #selector(pressed)
+        }
+        required init?(coder: NSCoder) { fatalError("not used") }
+        @objc private func pressed() { onPress() }
+    }
+
     // MARK: Hook installer
 
     private static func hooks() {
@@ -340,12 +404,28 @@ enum FeatureTest {
             try ClaudeHooks.install(at: url, port: 47823)  // twice: must not duplicate
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             let ours = text.components(separatedBy: ClaudeHooks.marker).count - 1
-            log("hooks installed: detected=\(ClaudeHooks.isInstalled(at: url)) ours=\(ours) keeps model=\(text.contains("\"opus\"")) keeps their Stop hook=\(text.contains("say done")) backup=\(FileManager.default.fileExists(atPath: url.path + ".notchnest-backup")) (want true, 2, true, true, true)")
+            log("hooks installed: detected=\(ClaudeHooks.isInstalled(at: url)) ours=\(ours) keeps model=\(text.contains("\"opus\"")) keeps their Stop hook=\(text.contains("say done")) backup=\(FileManager.default.fileExists(atPath: url.path + ".notchnest-backup")) (want true, 3 (two hooks and the status line), true, true, true)")
             try ClaudeHooks.uninstall(at: url)
             let after = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
             log("hooks removed: detected=\(ClaudeHooks.isInstalled(at: url)) theirs kept=\(after.contains("say done")) PermissionRequest gone=\(!after.contains("PermissionRequest")) (want false, true, true)")
-            try ClaudeHooks.install(at: folder.appendingPathComponent("fresh/settings.json"), port: 47823)
-            log("hooks into a missing settings file: detected=\(ClaudeHooks.isInstalled(at: folder.appendingPathComponent("fresh/settings.json"))) (want true)")
+            let fresh = folder.appendingPathComponent("fresh/settings.json")
+            try ClaudeHooks.install(at: fresh, port: 47823)
+            log("hooks into a missing settings file: detected=\(ClaudeHooks.isInstalled(at: fresh)) status line=\(ClaudeHooks.statusLineInstalled(at: fresh)) (want true, true)")
+            try ClaudeHooks.uninstall(at: fresh)
+            let freshAfter = (try? String(contentsOf: fresh, encoding: .utf8)) ?? ""
+            log("…and removed again: statusLine gone=\(!freshAfter.contains("statusLine")) (want true)")
+
+            // Someone's own status line: wrapped (still prints theirs), and put back on disconnect.
+            let theirs = folder.appendingPathComponent("theirs.json")
+            try #"{"statusLine":{"type":"command","command":"echo \"my line\"","padding":1}}"#.write(to: theirs, atomically: true, encoding: .utf8)
+            try ClaudeHooks.install(at: theirs, port: 47824)
+            try ClaudeHooks.install(at: theirs, port: 47824)  // twice: must not wrap it twice
+            let wrapped = (((try? JSONSerialization.jsonObject(with: Data(contentsOf: theirs))) as? [String: Any])?["statusLine"] as? [String: Any])?["command"] as? String ?? ""
+            let output = Self.shell(wrapped, input: ["model": ["display_name": "Opus 5"]])
+            log("their status line wrapped: prints “\(output)”, wrapped once=\(wrapped.components(separatedBy: "my line").count == 2) (want my line, true)")
+            try ClaudeHooks.uninstall(at: theirs)
+            let restored = (((try? JSONSerialization.jsonObject(with: Data(contentsOf: theirs))) as? [String: Any])?["statusLine"] as? [String: Any])
+            log("…and restored: command=\(restored?["command"] as? String ?? "none") padding=\(restored?["padding"] as? Int ?? -1) (want echo \"my line\", 1)")
         } catch {
             log("hooks failed: \(error.localizedDescription)")
         }
