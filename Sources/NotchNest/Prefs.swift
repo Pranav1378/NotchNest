@@ -67,6 +67,11 @@ enum Prefs {
     static let claudeUsageButton = "claudeUsageButton"
     static let claudeUsageInApp = "claudeUsageInApp"
     static let usageInAppWindow = "usageInAppWindow"
+    static let appleCalendar = "appleCalendar"
+    static let appleReminders = "appleReminders"
+    static let googleCalendar = "googleCalendar"
+    static let googleTasks = "googleTasks"
+    static let appleHiddenCalendars = "appleHiddenCalendars"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -83,6 +88,9 @@ enum Prefs {
             // Claude's usage page opens in the Claude app when it's installed, as that app's own
             // usage window (which needs Accessibility permission) when it can.
             claudeUsageInApp: true, usageInAppWindow: true,
+            appleCalendar: false, appleReminders: false,
+            // Google shows once signed in; each source can be switched off on its own.
+            googleCalendar: true, googleTasks: true,
         ])
     }
 

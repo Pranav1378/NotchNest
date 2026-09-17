@@ -193,7 +193,7 @@ struct CalendarWidget: View {
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 if calendar.isLoading { ProgressView().controlSize(.mini) }
-                if calendar.hasAccess {
+                if calendar.auth.isSignedIn {
                     Button {
                         if vm.composingEvent { vm.cancelComposingEvent() } else { vm.startComposingEvent() }
                     } label: {
@@ -229,7 +229,7 @@ struct CalendarWidget: View {
     @ViewBuilder private var eventList: some View {
         if !calendar.hasAccess {
             Button(action: vm.openSettings) {
-                Label("Connect Google Calendar", systemImage: "link")
+                Label("Connect a calendar", systemImage: "link")
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

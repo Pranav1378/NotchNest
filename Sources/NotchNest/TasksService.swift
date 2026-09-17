@@ -30,6 +30,7 @@ final class TasksService {
     static let scope = "https://www.googleapis.com/auth/tasks"
 
     let auth: GoogleAuth
+    let apple: AppleEventKit
     private(set) var lists: [GTaskList] = []
     private(set) var tasks: [GTask] = []
     private(set) var isLoading = false
@@ -48,8 +49,9 @@ final class TasksService {
 
     @ObservationIgnored private var timer: Timer?
 
-    init(auth: GoogleAuth) {
+    init(auth: GoogleAuth, apple: AppleEventKit) {
         self.auth = auth
+        self.apple = apple
         selectedListID = UserDefaults.standard.string(forKey: Prefs.tasksList)
         auth.whenSignedIn { [weak self] in Task { @MainActor in await self?.refresh() } }
         auth.whenSignedOut { [weak self] in
@@ -57,11 +59,17 @@ final class TasksService {
             self?.tasks = []
             self?.lastUpdated = nil
             self?.lastError = nil
+            Task { @MainActor in await self?.refresh() }  // Reminders may still be there
         }
+        apple.whenChanged { [weak self] in Task { @MainActor in await self?.refresh() } }
     }
 
-    /// Signed in, but from before Tasks was part of the sign-in.
-    var needsReconnect: Bool { auth.isSignedIn && !auth.hasScope(Self.scope) }
+    /// Google Tasks or Apple Reminders is available.
+    var hasSource: Bool { googleShown || apple.remindersReady }
+    var googleShown: Bool { auth.isSignedIn && Prefs.bool(Prefs.googleTasks) }
+
+    /// Signed in, but from before Tasks was part of the sign-in (and no Reminders to show instead).
+    var needsReconnect: Bool { googleShown && !auth.hasScope(Self.scope) && !apple.remindersReady }
     var currentList: GTaskList? { lists.first { $0.id == selectedListID } }
 
     /// `tasks` stays in Google's order; by date, the earliest due comes first, undated last,
@@ -94,26 +102,42 @@ final class TasksService {
     }
 
     func refresh() async {
-        guard auth.isSignedIn, auth.hasScope(Self.scope), !isLoading else { return }
+        let googleReady = googleShown && auth.hasScope(Self.scope)
+        guard !isLoading else { return }
+        guard googleReady || apple.remindersReady else {
+            lists = []
+            tasks = []
+            return
+        }
         isLoading = true
         defer { isLoading = false }
         let started = Date()
         do {
-            let token = try await auth.accessTokenValue()
-            ActivityLog.note("tasks: token ready after \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
-            let listResponse: ListsResponse = try await request(
-                "https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100", token: token)
-            lists = (listResponse.items ?? []).map { GTaskList(id: $0.id, title: $0.title ?? "Untitled") }
+            var found: [GTaskList] = []
+            var token: String?
+            if googleReady {
+                let value = try await auth.accessTokenValue()
+                token = value
+                ActivityLog.note("tasks: token ready after \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
+                let listResponse: ListsResponse = try await request(
+                    "https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100", token: value)
+                found = (listResponse.items ?? []).map { GTaskList(id: $0.id, title: $0.title ?? "Untitled") }
+            }
+            lists = found + apple.reminderLists()
             if currentList == nil { selectedListID = lists.first?.id }
             guard let listID = selectedListID else {
                 tasks = []
                 lastUpdated = Date()
                 return
             }
-            let response: TasksResponse = try await request(
-                "https://tasks.googleapis.com/tasks/v1/lists/\(Self.path(listID))/tasks?showCompleted=false&maxResults=100",
-                token: token)
-            tasks = Self.ordered(response.items ?? []).map(Self.makeTask)
+            if currentList?.isApple == true {
+                tasks = await apple.reminders(inList: listID)
+            } else if let token {
+                let response: TasksResponse = try await request(
+                    "https://tasks.googleapis.com/tasks/v1/lists/\(Self.path(listID))/tasks?showCompleted=false&maxResults=100",
+                    token: token)
+                tasks = Self.ordered(response.items ?? []).map(Self.makeTask)
+            }
             lastError = nil
             lastUpdated = Date()
             ActivityLog.note("tasks: \(lists.count) list(s), \(tasks.count) open task(s) in \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
@@ -129,6 +153,19 @@ final class TasksService {
     func complete(_ task: GTask) {
         guard let listID = selectedListID, let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
         tasks[index].completed = true
+        if currentList?.isApple == true {
+            Task {
+                do {
+                    try apple.complete(reminderID: task.id)
+                    try? await Task.sleep(for: .seconds(0.7))
+                    withAnimation(.smooth(duration: 0.25)) { tasks.removeAll { $0.id == task.id } }
+                } catch {
+                    if let index = tasks.firstIndex(where: { $0.id == task.id }) { tasks[index].completed = false }
+                    lastError = error.localizedDescription
+                }
+            }
+            return
+        }
         Task {
             do {
                 let token = try await auth.accessTokenValue()
@@ -149,6 +186,17 @@ final class TasksService {
         let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, let listID = selectedListID else { return }
         draft = ""
+        if currentList?.isApple == true {
+            do {
+                if let created = try apple.addReminder(title, toList: listID) {
+                    withAnimation(.smooth(duration: 0.25)) { tasks.insert(created, at: 0) }
+                }
+            } catch {
+                draft = title
+                lastError = error.localizedDescription
+            }
+            return
+        }
         Task {
             do {
                 let token = try await auth.accessTokenValue()

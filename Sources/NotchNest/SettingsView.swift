@@ -1,3 +1,4 @@
+import EventKit
 import ServiceManagement
 import SwiftUI
 
@@ -7,11 +8,15 @@ struct SettingsView: View {
     let weather: WeatherService
     let updater: Updater?
     let claude: ClaudeBridge
+    let apple: AppleEventKit
+    let tasks: TasksService
 
     var body: some View {
         TabView {
-            GoogleSettings(auth: auth, calendar: calendar)
+            GoogleSettings(auth: auth, calendar: calendar, tasks: tasks)
                 .tabItem { Label("Google", systemImage: "person.crop.circle") }
+            AppleSettings(apple: apple, calendar: calendar, tasks: tasks)
+                .tabItem { Label("Apple", systemImage: "applelogo") }
             GeneralSettings(weather: weather, updater: updater)
                 .tabItem { Label("General", systemImage: "gearshape") }
             ClaudeSettings(claude: claude)
@@ -256,9 +261,91 @@ struct ClaudeSettings: View {
     }
 }
 
+/// Apple Calendar and Apple Reminders: off until switched on here, which is when macOS asks.
+struct AppleSettings: View {
+    let apple: AppleEventKit
+    let calendar: CalendarService
+    let tasks: TasksService
+    @AppStorage(Prefs.appleCalendar) private var calendarOn = false
+    @AppStorage(Prefs.appleReminders) private var remindersOn = false
+
+    var body: some View {
+        Form {
+            Section("Apple Calendar") {
+                Toggle("Show Apple Calendar events in the notch", isOn: $calendarOn)
+                    .onChange(of: calendarOn) { _, on in
+                        Task {
+                            if on { _ = await apple.requestCalendarAccess() }
+                            await calendar.refresh()
+                        }
+                    }
+                if calendarOn {
+                    status(apple.eventsStatus, pane: "Privacy_Calendars")
+                    checklist(apple.eventCalendars)
+                }
+                Text("Events from the Calendar app (iCloud, Exchange, and accounts added in System Settings) appear alongside Google Calendar. An event in both only shows once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Apple Reminders") {
+                Toggle("Show Apple Reminders in the Tasks tab", isOn: $remindersOn)
+                    .onChange(of: remindersOn) { _, on in
+                        Task {
+                            if on { _ = await apple.requestRemindersAccess() }
+                            await tasks.refresh()
+                        }
+                    }
+                if remindersOn {
+                    status(apple.remindersStatus, pane: "Privacy_Reminders")
+                    checklist(apple.reminderCalendars)
+                }
+                Text("Your Reminders lists appear in the Tasks tab's list menu, under Google Tasks. Tick reminders off or add new ones from the notch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { apple.refreshStatus() }
+    }
+
+    /// One switch per calendar or list, like Google's list.
+    private func checklist(_ sources: [AppleEventKit.Source]) -> some View {
+        ForEach(sources) { source in
+            Toggle(isOn: Binding(get: { apple.isShown(source.id) }, set: { apple.setShown(source.id, $0) })) {
+                HStack(spacing: 8) {
+                    Circle().fill(source.color).frame(width: 10, height: 10)
+                    Text(source.title)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func status(_ status: EKAuthorizationStatus, pane: String) -> some View {
+        switch status {
+        case .fullAccess:
+            Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        case .notDetermined:
+            Label("Waiting for your OK in the macOS prompt…", systemImage: "hourglass").foregroundStyle(.secondary)
+        default:
+            HStack {
+                Label("Not allowed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Spacer()
+                Button("Open Privacy Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!)
+                }
+            }
+        }
+    }
+}
+
 struct GoogleSettings: View {
     @Bindable var auth: GoogleAuth
     let calendar: CalendarService
+    let tasks: TasksService
+    @AppStorage(Prefs.googleCalendar) private var calendarOn = true
+    @AppStorage(Prefs.googleTasks) private var tasksOn = true
 
     var body: some View {
         Form {
@@ -303,6 +390,15 @@ struct GoogleSettings: View {
                         .disabled(auth.isSigningIn)
                 }
             }
+        }
+        Section("Use Google for") {
+            Toggle("Calendar events in the notch", isOn: $calendarOn)
+                .onChange(of: calendarOn) { _, _ in Task { await calendar.refresh() } }
+            Toggle("Tasks in the Tasks tab", isOn: $tasksOn)
+                .onChange(of: tasksOn) { _, _ in Task { await tasks.refresh() } }
+            Text("Use Google, Apple (Settings → Apple), or both. Events that are in both only show once.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         Section("Calendars shown in the notch") {
             if calendar.calendars.isEmpty {

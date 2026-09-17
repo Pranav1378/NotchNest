@@ -20,6 +20,10 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>NotchNest shows your Apple Calendar events in the notch.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>NotchNest shows your Apple Calendar events in the notch.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>NotchNest shows a live camera preview in the Mirror widget.</string>
 	<key>NSHighResolutionCapable</key>
@@ -28,6 +32,10 @@
 	<string>NotchNest shows the weather where you are.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>NotchNest shows the weather where you are.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>NotchNest shows your Apple Reminders in the Tasks tab, and ticks off or adds reminders when you ask.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>NotchNest shows your Apple Reminders in the Tasks tab, and ticks off or adds reminders when you ask.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

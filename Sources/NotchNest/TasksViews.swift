@@ -5,10 +5,10 @@ struct TasksView: View {
     let openSettings: () -> Void
 
     var body: some View {
-        if !tasks.auth.isSignedIn {
+        if !tasks.hasSource {
             VStack(spacing: 8) {
                 Image(systemName: "checklist").font(.system(size: 22)).foregroundStyle(.secondary)
-                Text("Connect your Google account to see your tasks.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Connect Google Tasks, or turn on Apple Reminders, in Settings.").font(.system(size: 11)).foregroundStyle(.secondary)
                 pill("Open Settings", action: openSettings)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -40,8 +40,17 @@ struct TasksView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Menu {
-                    ForEach(tasks.lists) { list in
-                        Button(list.title) { tasks.selectedListID = list.id }
+                    let google = tasks.lists.filter { !$0.isApple }
+                    let reminders = tasks.lists.filter(\.isApple)
+                    if !google.isEmpty {
+                        Section("Google Tasks") {
+                            ForEach(google) { list in Button(list.title) { tasks.selectedListID = list.id } }
+                        }
+                    }
+                    if !reminders.isEmpty {
+                        Section("Reminders") {
+                            ForEach(reminders) { list in Button(list.title) { tasks.selectedListID = list.id } }
+                        }
                     }
                 } label: {
                     Text(tasks.currentList?.title ?? "Tasks").font(.system(size: 12, weight: .semibold))

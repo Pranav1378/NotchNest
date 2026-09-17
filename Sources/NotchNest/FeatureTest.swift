@@ -1,4 +1,5 @@
 import AppKit
+import EventKit
 import SwiftUI
 
 /// `NotchNest --featuretest`: checks the timer, the Claude Code bridge and hooks, notch placement
@@ -17,6 +18,7 @@ enum FeatureTest {
             await claude(vm: vm)
             await clicks(vm: vm, notch: notch)
             await accessibility()
+            appleEventKit()
             hooks()
             log("done")
             exit(0)
@@ -347,6 +349,34 @@ enum FeatureTest {
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    // MARK: Apple Calendar and Reminders
+
+    /// Unsaved EventKit objects, so no calendar is read and no permission is needed.
+    private static func appleEventKit() {
+        let store = EKEventStore()
+        log("apple calendar access: \(EKEventStore.authorizationStatus(for: .event).rawValue), reminders: \(EKEventStore.authorizationStatus(for: .reminder).rawValue) (3 = allowed, 0 = not asked yet)")
+        let event = EKEvent(eventStore: store)
+        event.title = "Design review"
+        event.startDate = Date(timeIntervalSince1970: 1_800_000_000)
+        event.endDate = event.startDate.addingTimeInterval(3600)
+        event.notes = "Agenda first. Join: https://meet.google.com/abc-defg-hij"
+        let mapped = AppleEventKit.makeEvent(event)
+        let minutes = mapped.map { Int($0.end.timeIntervalSince($0.start) / 60) } ?? 0
+        log("apple event → “\(mapped?.title ?? "nil")” \(minutes) min, Join link \(mapped?.meetLink?.host ?? "none") (want Design review, 60, meet.google.com)")
+        let sameInGoogle = CalEvent(id: "g1", title: "Design Review", start: event.startDate, end: event.endDate,
+                                    isAllDay: false, color: .blue, meetLink: nil, htmlLink: nil)
+        let other = CalEvent(id: "g2", title: "Lunch", start: event.startDate, end: event.endDate,
+                             isAllDay: false, color: .blue, meetLink: nil, htmlLink: nil)
+        let merged = CalendarService.merge(google: [sameInGoogle, other], apple: mapped.map { [$0] } ?? [])
+        log("Google + Apple with one shared event: \(merged.count) events (want 2, the shared one only once)")
+        let reminder = EKReminder(eventStore: store)
+        reminder.title = "  Buy milk "
+        reminder.dueDateComponents = DateComponents(year: 2026, month: 9, day: 20)
+        let task = AppleEventKit.makeTask(reminder)
+        log("apple reminder → “\(task.title)” due \(task.due?.formatted(.dateTime.month(.abbreviated).day()) ?? "none") (want Buy milk, Sep 20)")
+        log("reminders list ids are told apart from Google's: \(GTaskList(id: AppleEventKit.listPrefix + "x", title: "").isApple) / \(GTaskList(id: "MTIzNDU", title: "").isApple) (want true / false)")
     }
 
     // MARK: Clicking another app's Usage item

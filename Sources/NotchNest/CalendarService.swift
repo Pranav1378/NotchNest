@@ -35,11 +35,16 @@ enum CalendarError: LocalizedError {
     var errorDescription: String? { if case .api(let message) = self { return message }; return nil }
 }
 
-/// Reads the next week of events from the Google Calendar API.
+/// Reads the next week of events from the Google Calendar API, plus Apple Calendar when it's on.
 @Observable @MainActor
 final class CalendarService {
     let auth: GoogleAuth
+    let apple: AppleEventKit
+    /// Google's events.
     private(set) var events: [CalEvent] = []
+    private(set) var appleEvents: [CalEvent] = []
+    /// Both, without duplicates: what the notch shows.
+    private(set) var combined: [CalEvent] = []
     private(set) var calendars: [GoogleCalendarInfo] = []
     private(set) var isLoading = false
     private(set) var lastError: String?
@@ -52,9 +57,11 @@ final class CalendarService {
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var ticks = 0
 
-    init(auth: GoogleAuth) {
+    init(auth: GoogleAuth, apple: AppleEventKit) {
         self.auth = auth
+        self.apple = apple
         overrides = UserDefaults.standard.dictionary(forKey: Prefs.calendarOverrides) as? [String: Bool] ?? [:]
+        apple.whenChanged { [weak self] in Task { @MainActor in await self?.refresh() } }
         auth.whenSignedIn { [weak self] in Task { @MainActor in await self?.refresh() } }
         auth.whenSignedOut { [weak self] in
             self?.events = []
@@ -62,6 +69,7 @@ final class CalendarService {
             self?.imminentEvent = nil
             self?.lastUpdated = nil
             self?.lastError = nil
+            self?.combine()
         }
     }
 
@@ -70,7 +78,8 @@ final class CalendarService {
     /// The day the week strip should jump to (set after quick-adding an event).
     private(set) var focusDay: Date?
 
-    var hasAccess: Bool { auth.isSignedIn }
+    var googleShown: Bool { auth.isSignedIn && Prefs.bool(Prefs.googleCalendar) }
+    var hasAccess: Bool { googleShown || apple.calendarReady }
     var canAddEvents: Bool { auth.hasScope(Self.writeScope) }
 
     /// Creates an event from plain English ("Study group Thu 7pm") with Google's quick-add, then
@@ -128,7 +137,7 @@ final class CalendarService {
         let cal = Calendar.current
         let start = cal.startOfDay(for: day)
         guard let end = cal.date(byAdding: .day, value: 1, to: start) else { return [] }
-        return events.filter { $0.start < end && $0.end > start }
+        return combined.filter { $0.start < end && $0.end > start }
             .sorted { ($0.isAllDay ? 0 : 1, $0.start) < ($1.isAllDay ? 0 : 1, $1.start) }
     }
 
@@ -145,7 +154,21 @@ final class CalendarService {
     // MARK: Fetching
 
     func refresh() async {
-        guard auth.isSignedIn, !isLoading else { return }
+        guard !isLoading else { return }
+        let window = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: .now))!
+        appleEvents = apple.events(from: window, to: Calendar.current.date(byAdding: .day, value: 8, to: window)!)
+        combine()
+        guard googleShown else {
+            if !events.isEmpty {
+                events = []
+                combine()
+            }
+            if apple.calendarReady {
+                lastError = nil
+                lastUpdated = Date()
+            }
+            return
+        }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -184,15 +207,27 @@ final class CalendarService {
             events = collected.sorted { $0.start < $1.start }
             lastError = nil
             lastUpdated = Date()
-            updateImminent()
+            combine()
         } catch {
             lastError = error.localizedDescription
         }
     }
 
+    private func combine() {
+        combined = Self.merge(google: events, apple: appleEvents)
+        updateImminent()
+    }
+
+    /// A calendar added both to Google and to the Mac's Calendar app shouldn't show its events twice.
+    static func merge(google: [CalEvent], apple: [CalEvent]) -> [CalEvent] {
+        func key(_ event: CalEvent) -> String { "\(event.title.lowercased())|\(Int(event.start.timeIntervalSince1970))" }
+        let seen = Set(google.map(key))
+        return (google + apple.filter { !seen.contains(key($0)) }).sorted { $0.start < $1.start }
+    }
+
     private func updateImminent() {
         let now = Date()
-        let next = events.first {
+        let next = combined.first {
             !$0.isAllDay && $0.start <= now.addingTimeInterval(10 * 60) && $0.start >= now.addingTimeInterval(-5 * 60)
         }
         if next != imminentEvent { imminentEvent = next }

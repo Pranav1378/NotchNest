@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var media: MediaController!
     private var auth: GoogleAuth!
     private var calendar: CalendarService!
+    private var apple: AppleEventKit!
     private var tasks: TasksService!
     private var battery: BatteryMonitor!
     private var camera: CameraMirror!
@@ -29,8 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         media = MediaController()
         auth = GoogleAuth()
-        calendar = CalendarService(auth: auth)
-        tasks = TasksService(auth: auth)
+        apple = AppleEventKit()
+        calendar = CalendarService(auth: auth, apple: apple)
+        tasks = TasksService(auth: auth, apple: apple)
         battery = BatteryMonitor()
         camera = CameraMirror()
         tray = TrayStore()
@@ -137,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             let window = NSWindow(contentViewController: NSHostingController(
                 rootView: SettingsView(auth: auth, calendar: calendar, weather: weather, updater: updater,
-                                       claude: claude)))
+                                       claude: claude, apple: apple, tasks: tasks)))
             window.title = "NotchNest"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false

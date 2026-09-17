@@ -4,9 +4,9 @@ NotchNest makes your MacBook's notch useful. Move your pointer onto the notch an
 
 | Tab | What's in it |
 |---|---|
-| **Nook** | What's playing (Spotify, Apple Music, YouTube…) with play/pause/skip, your Google Calendar with a **+** to add events, and a camera mirror |
+| **Nook** | What's playing (Spotify, Apple Music, YouTube…) with play/pause/skip, your Google and/or Apple Calendar (with a **+** to add Google events), and a camera mirror |
 | **Tray** | A shelf for files. Drag files onto the notch, or copy a screenshot and press **⌘V**. The **Clipboard** side remembers your last 30 copies. |
-| **Tasks** | Your Google Tasks, sorted by due date. Tick them off or add new ones. |
+| **Tasks** | Your Google Tasks and/or Apple Reminders, sorted by due date. Tick them off or add new ones. |
 
 While it's closed, the notch shows little **live activities**: album art and lyrics while music plays, a countdown before meetings, battery when you plug in, and AirPods battery when they connect.
 
@@ -56,7 +56,13 @@ NotchNest has **no Dock icon and no window**. It lives in the notch.
 
 The Settings window opens by itself the first time.
 
-### Step 6: Connect your Google account (for Calendar and Tasks)
+### Step 6: Connect your calendar and tasks
+
+Use **Google**, **Apple** (the Calendar and Reminders apps), or **both**. Each one has its own switch.
+
+**Apple Calendar and Reminders:** in **Settings → Apple**, turn on **Show Apple Calendar events** and/or **Show Apple Reminders**, and click **OK** when macOS asks. Untick any calendars or lists you don't want in the notch.
+
+**Google Calendar and Tasks:**
 
 > ✅ **No invite needed.** Any Google account can sign in; nobody has to add you first.
 
@@ -66,7 +72,7 @@ The Settings window opens by itself the first time.
 4. Tick the boxes to allow **Calendar** and **Tasks**, then click **Continue**.
 5. The browser says **"NotchNest is connected"**. Close that tab.
 
-Your calendar and tasks now show up in the notch. NotchNest only ever sees **your own** account, and your sign-in is stored in your Mac's Keychain.
+Your calendar and tasks now show up in the notch. NotchNest only ever sees **your own** account, and your sign-in is stored in your Mac's Keychain. To use only part of Google, switch **Calendar** or **Tasks** off under **Settings → Google → Use Google for**.
 
 ### Step 7 (optional): Start it automatically
 
@@ -82,6 +88,8 @@ All of these are optional. Say no and that one feature just won't work.
 |---|---|
 | **Location** | Showing the weather next to the battery. Prefer not to? Type your city in Settings → General → Weather. |
 | **Camera** | The **Mirror** tile, only when you click it. |
+| **Calendars** | Only if you turn on Apple Calendar: showing its events in the notch. |
+| **Reminders** | Only if you turn on Apple Reminders: showing, ticking off and adding reminders in the Tasks tab. |
 | **Keychain / "wants to use your confidential information"** | Remembering your Google sign-in. Click **Always Allow**. |
 | **Accessibility** | Only for the ✦ / ✨ usage buttons: it lets NotchNest press ⌘, in Claude or Gemini and click Usage, so their usage window opens over what you're doing. Say no and the buttons open the usage page in your browser instead. |
 | **Downloads folder** | Telling you when a download finishes (and optionally adding it to the Tray). Prefer not to? Turn off *Downloads* in Settings → General. |
@@ -122,6 +130,7 @@ To check yourself: **Settings → General → Check for Updates…**
 | On a call, the notch shows 🎤 / 📷 | Something is using your mic or camera. Click it to **mute your mic** (it unmutes by itself when the call ends). |
 | A meeting with a video link is coming up | Click **Join** in the notch |
 | Using Claude Code? | Settings → **Claude & Gemini** → **Connect**. When Claude needs permission, the notch shows **Allow / Deny**; when it finishes, the notch tells you. |
+| Pick a Reminders list | In the Tasks tab, click the list name: Google Tasks lists and Reminders lists are both there |
 | Check your AI usage | Click **✦** (Claude) or **✨** (Gemini) in the notch's top bar. With Accessibility permission, each app's own usage window opens over what you're doing; otherwise the usage page opens in your browser. Switch the buttons on or off in Settings → Claude & Gemini. |
 | More than one screen | Settings → General → **Displays**: keep the notch on your MacBook, on your main monitor, or have it follow your pointer. Screens without a notch get a small black one in the menu bar. |
 
