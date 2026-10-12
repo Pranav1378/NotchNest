@@ -72,16 +72,15 @@ enum UsagePages {
     /// Gemini keeps no usage on this Mac, so the notch opens the app's own Usage limits screen
     /// (⌘, then the sidebar item). The web page is the fallback.
     static func openGemini() {
-        if Prefs.bool(Prefs.geminiUsageInApp),
+        if Prefs.bool(Prefs.geminiInAppUsage),
            inAppWindow(bundleID: geminiBundle, names: ["Usage limits", "Usage"], appName: "Gemini") { return }
         open("https://gemini.google.com/usage", "Gemini")
     }
 
-    /// ⌘, in the app, then its Usage item. Returns false when that isn't possible (no permission,
-    /// app not installed, or the setting is off) so the caller falls back to the usage page.
+    /// ⌘, in the app, then its Usage item. Returns false when that isn't possible (no permission or
+    /// the app isn't installed) so the caller falls back to the usage page.
     private static func inAppWindow(bundleID: String, names: [String], appName: String) -> Bool {
-        guard Prefs.bool(Prefs.usageInAppWindow),
-              NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil else { return false }
+        guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil else { return false }
         guard AppAutomation.isTrusted else {
             // Ask once per launch, then fall back to the usage page for this click.
             if !askedForTrust {

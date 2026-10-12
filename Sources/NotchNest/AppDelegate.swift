@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Prefs.tidyOldKeys()
         Prefs.register()
         installMainMenu()
 
@@ -116,14 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 try? await Task.sleep(for: .seconds(2))
-                print("--- Gemini (settings → Usage limits)")
-                await withCheckedContinuation { continuation in
-                    AppAutomation.openUsage(bundleID: UsagePages.geminiBundle,
-                                            itemNames: ["Usage limits", "Usage"]) { outcome in
-                        print("Gemini: \(outcome.rawValue)")
-                        continuation.resume()
-                    }
-                }
+                print("--- Gemini (what the ✨ button itself does)")
+                UsagePages.openGemini()
+                try? await Task.sleep(for: .seconds(9))
+                let log = (try? String(contentsOf: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("NotchNest/activity.log"), encoding: .utf8)) ?? ""
+                let last = log.split(separator: "\n").last { $0.contains("Gemini") } ?? ""
+                print("Gemini: \(last.contains("usage window: pressed") ? "opened its Usage limits screen" : "fell back → \(last)")")
                 exit(0)
             }
             return

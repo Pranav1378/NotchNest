@@ -151,7 +151,7 @@ struct ClaudeSettings: View {
     @AppStorage(Prefs.claudeUsageInApp) private var claudeInApp = true
     @AppStorage(Prefs.claudeUsageButton) private var claudeButton = true
     @AppStorage(Prefs.usageInAppWindow) private var inAppWindow = true
-    @AppStorage(Prefs.geminiUsageInApp) private var geminiInApp = true
+    @AppStorage(Prefs.geminiInAppUsage) private var geminiInApp = true
     @State private var accessibility = AppAutomation.isTrusted
     @State private var installed = ClaudeHooks.isInstalled()
     @State private var statusInstalled = ClaudeHooks.statusLineInstalled()
