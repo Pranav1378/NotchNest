@@ -156,7 +156,7 @@ struct UsageIconButton: View {
         } else if kind == .gemini, Prefs.bool(Prefs.geminiOpensApp) {
             UsagePages.openGemini()  // for people who'd rather jump into Gemini itself
         } else {
-            vm?.toggleUsageCard(refreshGemini: kind == .gemini)
+            vm?.toggleUsageCard()
         }
     }
 
@@ -240,7 +240,7 @@ struct UsageCard: View {
             if vm.gemini.isReading {
                 ProgressView().controlSize(.mini)
             } else {
-                refreshButton(help: "Read Gemini's usage (its window flashes up for a second)") { vm.gemini.refresh() }
+                refreshButton(help: "Read Gemini's usage again (nothing appears on screen)") { vm.gemini.refresh() }
             }
             link("open") { UsagePages.openGemini() }
         }
@@ -249,7 +249,7 @@ struct UsageCard: View {
             bar("Weekly limit", reading.week, now: now, note: reading.weekResets)
         } else {
             Text(vm.gemini.isReading ? "Reading Gemini's usage…"
-                 : "Press ↻ to read it from the Gemini app; Google keeps no numbers on this Mac.")
+                 : "Open Gemini once and these fill in; NotchNest reads them quietly after that.")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -108,6 +108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if args.contains("--quietstrategies") {
+            Task { @MainActor in
+                await withCheckedContinuation { continuation in
+                    AppAutomation.quietStrategies(bundleID: UsagePages.geminiBundle, item: "Usage limits") { notes in
+                        notes.forEach { print("  •", $0) }
+                        continuation.resume()
+                    }
+                }
+                exit(0)
+            }
+            return
+        }
         if args.contains("--quietread") {
             Task { @MainActor in
                 await withCheckedContinuation { continuation in

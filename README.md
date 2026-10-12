@@ -131,7 +131,7 @@ To check yourself: **Settings → General → Check for Updates…**
 | A meeting with a video link is coming up | Click **Join** in the notch |
 | Using Claude Code? | Settings → **Claude & Gemini** → **Connect**. When Claude needs permission, the notch shows **Allow / Deny**; when it finishes, the notch tells you. |
 | Pick a Reminders list | In the Tasks tab, click the list name: Google Tasks lists and Reminders lists are both there |
-| Check your AI usage | Click **✦** or **✨** in the notch: Claude's and Gemini's session and weekly bars appear right there. Claude's come from the Claude app's own data (it refreshes every 15 min); Gemini keeps none on your Mac, so **↻** reads them from its Usage limits screen, which flashes up for a second. Switch either button off in Settings → Claude & Gemini. |
+| Check your AI usage | Click **✦** or **✨** in the notch: Claude's and Gemini's session and weekly bars appear right there. Claude's come from the Claude app's own data (it refreshes every 15 min). Gemini's are read from its Usage limits screen while Gemini stays in the background, so nothing appears on screen — it just has to be running. |
 | More than one screen | Settings → General → **Displays**: keep the notch on your MacBook, on your main monitor, or have it follow your pointer. Screens without a notch get a small black one in the menu bar. |
 
 Every feature can be switched off in **Settings → General**.

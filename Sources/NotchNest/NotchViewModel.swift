@@ -489,9 +489,10 @@ final class NotchViewModel {
         if timerCardShown { stats.setActive(false) }
     }
 
-    func toggleUsageCard(refreshGemini: Bool = false) {
+    func toggleUsageCard(refreshGemini: Bool = true) {
         planUsage.reload()
-        if refreshGemini && gemini.isStale { gemini.refresh() }
+        // The Gemini read is invisible, so it can just happen when the card opens.
+        if refreshGemini && gemini.isStale && !usageCardShown { gemini.refresh() }
         withAnimation(.smooth(duration: 0.2)) {
             usageCardShown.toggle()
             if usageCardShown {

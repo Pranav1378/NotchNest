@@ -36,12 +36,15 @@ final class GeminiUsage {
             announce("Allow Accessibility to read Gemini's usage")
             return
         }
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: UsagePages.geminiBundle).first != nil else {
+            announce("Open Gemini once and its usage shows here")
+            return
+        }
         isReading = true
-        let wasFront = NSWorkspace.shared.frontmostApplication
-        AppAutomation.readUsagePanel(bundleID: UsagePages.geminiBundle, item: "Usage limits") { [weak self] lines in
+        // Nothing appears on screen: Gemini is never brought forward.
+        AppAutomation.quietUsageRead(bundleID: UsagePages.geminiBundle, item: "Usage limits") { [weak self] lines in
             guard let self else { return }
             isReading = false
-            wasFront?.activate()  // straight back to what you were doing
             guard let reading = Self.parse(lines) else {
                 ActivityLog.note("gemini usage: couldn't read the panel (\(lines.count) lines)")
                 announce("Couldn't read Gemini's usage")

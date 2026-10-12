@@ -203,7 +203,7 @@ struct ClaudeSettings: View {
                 Toggle("✨ Gemini usage button in the notch", isOn: $gemini)
                 Toggle("✨ opens the Gemini app instead of the notch card", isOn: $geminiOpensApp)
                     .disabled(!gemini)
-                Text("Google keeps no usage numbers on this Mac, so NotchNest reads them from Gemini's own Usage limits screen: its window flashes up for about a second when you press ↻ on the card, then the numbers live in the notch. Needs Accessibility permission.")
+                Text("Google keeps no usage numbers on this Mac, so NotchNest reads them from Gemini's own Usage limits screen while Gemini stays in the background — nothing appears on screen, and Gemini has to be running. Needs Accessibility permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

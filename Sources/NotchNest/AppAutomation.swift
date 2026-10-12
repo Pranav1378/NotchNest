@@ -139,6 +139,46 @@ enum AppAutomation {
         }
     }
 
+    /// Reads a settings panel with nothing appearing on screen: the app is never brought forward,
+    /// its settings window opens in the background, the row is selected the way a screen reader
+    /// would, the text is read, and the window is closed again.
+    static func quietUsageRead(bundleID: String, item: String, completion: @escaping ([String]) -> Void) {
+        guard isTrusted, let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+            completion([])  // not running: launching it would put it on screen, which is the thing to avoid
+            return
+        }
+        let pid = app.processIdentifier
+        settingsShortcut(to: pid)
+        AXSearch.queue.asyncAfter(deadline: .now() + 1.2) {
+            let picked = AXSearch.selectRowQuietly(pid: pid, named: item)
+            Thread.sleep(forTimeInterval: picked ? 1.0 : 0)
+            let lines = picked ? AXSearch.texts(pid: pid) : []
+            DispatchQueue.main.async {
+                closeWindowShortcut(to: pid)
+                ActivityLog.note("quiet read of \(item): picked=\(picked), \(lines.count) lines")
+                completion(lines)
+            }
+        }
+    }
+
+    /// Experiment: which accessibility trick can switch a settings panel while the window is NOT in
+    /// front? If one works, Gemini's numbers can be refreshed with nothing appearing on screen.
+    static func quietStrategies(bundleID: String, item: String, completion: @escaping ([String]) -> Void) {
+        guard isTrusted, let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+            completion(["app isn't running"])
+            return
+        }
+        let pid = app.processIdentifier
+        settingsShortcut(to: pid)
+        AXSearch.queue.asyncAfter(deadline: .now() + 1.5) {
+            let results = AXSearch.trySelecting(pid: pid, named: item)
+            DispatchQueue.main.async {
+                closeWindowShortcut(to: pid)
+                completion(results)
+            }
+        }
+    }
+
     /// Experiment: open an app's settings WITHOUT bringing it to the front, read a panel, close it.
     /// If this works, Gemini's numbers can land in the notch with no app switch at all.
     static func quietRead(bundleID: String, item: String, completion: @escaping ([String]) -> Void) {
@@ -302,6 +342,106 @@ enum AXSearch {
             }
             guard depth < 40 else { continue }
             for child in children(of: element) { queue.append((child, depth + 1)) }
+        }
+        return nil
+    }
+
+    /// Selects a sidebar row without the window being in front. Setting AXSelected on the row (the
+    /// element two levels above the label) is what Gemini's settings respond to.
+    static func selectRowQuietly(pid: pid_t, named name: String) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 2)
+        guard let label = element(in: app, named: name) else { return false }
+        var current = label
+        for _ in 0..<4 {
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parent) == .success,
+                  let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+            current = parent as! AXUIElement
+            guard AXUIElementSetAttributeValue(current, kAXSelectedAttribute as CFString, kCFBooleanTrue) == .success
+            else { continue }
+            Thread.sleep(forTimeInterval: 0.9)
+            if texts(pid: pid).contains(where: { $0.contains("% used") }) { return true }
+        }
+        return false
+    }
+
+    /// Tries every way of choosing a sidebar row without the window being in front, and reports
+    /// which one actually changed the panel.
+    static func trySelecting(pid: pid_t, named name: String) -> [String] {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 2)
+        guard let row = element(in: app, named: name) else { return ["couldn't find “\(name)”"] }
+        var notes: [String] = []
+        func panelChanged() -> Bool {
+            Thread.sleep(forTimeInterval: 1.0)
+            return texts(pid: pid).contains { $0.contains("% used") }
+        }
+        // 1. The row's own actions.
+        var actions: CFArray?
+        AXUIElementCopyActionNames(row, &actions)
+        notes.append("row is \(string(row, kAXRoleAttribute) ?? "?") with actions \((actions as? [String] ?? []).joined(separator: ","))")
+        for action in (actions as? [String] ?? []) {
+            if AXUIElementPerformAction(row, action as CFString) == .success, panelChanged() {
+                return notes + ["WORKS: row action \(action)"]
+            }
+        }
+        // 2. Mark the row selected, or focused.
+        for attribute in [kAXSelectedAttribute, kAXFocusedAttribute] {
+            if AXUIElementSetAttributeValue(row, attribute as CFString, kCFBooleanTrue) == .success, panelChanged() {
+                return notes + ["WORKS: set \(attribute) on the row"]
+            }
+        }
+        // 3. Climb the ancestors: the selectable thing is usually a row, or the outline above it.
+        var ancestors: [AXUIElement] = []
+        var current = row
+        for _ in 0..<6 {
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parent) == .success,
+                  let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { break }
+            current = parent as! AXUIElement
+            ancestors.append(current)
+        }
+        notes.append("ancestors: \(ancestors.compactMap { string($0, kAXRoleAttribute) }.joined(separator: " → "))")
+        for (depth, ancestor) in ancestors.enumerated() {
+            let role = string(ancestor, kAXRoleAttribute) ?? "?"
+            var actions: CFArray?
+            AXUIElementCopyActionNames(ancestor, &actions)
+            for action in (actions as? [String] ?? []) {
+                if AXUIElementPerformAction(ancestor, action as CFString) == .success, panelChanged() {
+                    return notes + ["WORKS: \(action) on the \(role) \(depth) levels up"]
+                }
+            }
+            for attribute in [kAXSelectedAttribute, kAXFocusedAttribute] {
+                if AXUIElementSetAttributeValue(ancestor, attribute as CFString, kCFBooleanTrue) == .success, panelChanged() {
+                    return notes + ["WORKS: set \(attribute) on the \(role) \(depth) levels up"]
+                }
+            }
+            // Tell a list/outline which of its rows is chosen.
+            for attribute in [kAXSelectedChildrenAttribute, kAXSelectedRowsAttribute] {
+                for candidate in [row] + ancestors.prefix(depth) {
+                    if AXUIElementSetAttributeValue(ancestor, attribute as CFString, [candidate] as CFArray) == .success,
+                       panelChanged() {
+                        return notes + ["WORKS: set \(attribute) on the \(role) \(depth) levels up"]
+                    }
+                }
+            }
+        }
+        return notes + ["nothing worked while the window was in the background"]
+    }
+
+    private static func element(in app: AXUIElement, named name: String) -> AXUIElement? {
+        var queue: [(AXUIElement, Int)] = [(app, 0)]
+        var index = 0
+        let wanted = name.lowercased()
+        while index < queue.count, index < 20_000 {
+            let (element, depth) = queue[index]
+            index += 1
+            let matches = [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute]
+                .compactMap { string(element, $0)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .contains(wanted)
+            if matches { return element }
+            if depth < 40 { for child in children(of: element) { queue.append((child, depth + 1)) } }
         }
         return nil
     }
