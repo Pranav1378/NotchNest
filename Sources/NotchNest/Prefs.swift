@@ -72,6 +72,9 @@ enum Prefs {
     static let googleCalendar = "googleCalendar"
     static let googleTasks = "googleTasks"
     static let appleHiddenCalendars = "appleHiddenCalendars"
+    static let keepAwake = "keepAwake"
+    static let keepAwakeUntil = "keepAwakeUntil"
+    static let keepAwakeMode = "keepAwakeMode"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -87,7 +90,7 @@ enum Prefs {
             claudeUsageButton: FileManager.default.fileExists(atPath: "/Applications/Claude.app"),
             // Claude's usage page opens in the Claude app when it's installed, as that app's own
             // usage window (which needs Accessibility permission) when it can.
-            claudeUsageInApp: true, usageInAppWindow: true,
+            claudeUsageInApp: true, usageInAppWindow: false,
             appleCalendar: false, appleReminders: false,
             // Google shows once signed in; each source can be switched off on its own.
             googleCalendar: true, googleTasks: true,

@@ -78,6 +78,10 @@ enum Snapshot {
         _ = try? await URLSession.shared.data(for: status)
         vm.isOpen = true
         render(vm, name: "open-usage-icons", to: directory)
+        vm.planUsage.reload()
+        vm.usageCardShown = true
+        render(vm, name: "open-usage-card", to: directory)
+        vm.usageCardShown = false
         vm.isOpen = false
 
         // An external monitor: the pill in its menu bar.

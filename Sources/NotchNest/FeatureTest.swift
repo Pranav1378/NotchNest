@@ -19,6 +19,8 @@ enum FeatureTest {
             await clicks(vm: vm, notch: notch)
             await accessibility()
             appleEventKit()
+            clipboardDrag()
+            planUsage()
             hooks()
             log("done")
             exit(0)
@@ -155,11 +157,18 @@ enum FeatureTest {
         privacy.poll()
         log("camera in use: \(privacy.cameraInUse), microphone in use: \(privacy.micInUse), microphones: \(PrivacyMonitor.inputs().compactMap(SystemVolume.name))")
         let awake = KeepAwake()
-        awake.on()
+        awake.on(minutes: nil)
         let during = assertions().contains("NotchNest Keep Awake")
         awake.off()
         let after = assertions().contains("NotchNest Keep Awake")
         log("keep awake: held=\(during) released=\(!after) (want true, true)")
+        log("keep awake modes: \(KeepAwake.Mode.screen.title) / \(KeepAwake.Mode.lidClosed.title); macOS sleep currently off=\(KeepAwake.systemSleepDisabled()) (want Screen on / Lid closed, false)")
+        awake.on(minutes: 15)
+        let minutes = awake.remaining().map { Int($0 / 60) + 1 } ?? 0
+        let held = assertions().contains("NotchNest Keep Awake")
+        log("keep awake for 15 min: held=\(held), \(minutes) min left, remembered=\(Prefs.bool(Prefs.keepAwake)) (want true, 15, true)")
+        awake.off()
+        log("keep awake wording: \(KeepAwake.describe(15)) / \(KeepAwake.describe(60)) / \(KeepAwake.describe(240)), forgotten=\(!Prefs.bool(Prefs.keepAwake)) (want for 15 min / for 1 hour / for 4 hours, true)")
     }
 
     private static func assertions() -> String {
@@ -349,6 +358,48 @@ enum FeatureTest {
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    // MARK: Claude's usage, read from the Claude app's own file
+
+    private static func planUsage() {
+        let fixture = #"{"version":2,"samples":[{"t":1791800000000,"org":"x","u":{"fh":12,"sd":40}},{"t":1791825982390,"org":"x","u":{"fh":53,"sd":22}}]}"#
+        let parsed = ClaudePlanUsage.parse(Data(fixture.utf8))
+        log("claude usage file: session \(parsed.map { Int($0.session) } ?? -1)%, week \(parsed.map { Int($0.week) } ?? -1)% (want 53, 22 — the newest sample)")
+        log("rubbish in that file is ignored: \(ClaudePlanUsage.parse(Data("not json".utf8)) == nil) (want true)")
+        let live = ClaudePlanUsage.read()
+        log("this Mac's Claude app: \(live.map { "session \(Int($0.session))%, week \(Int($0.week))%, written \(Int(Date().timeIntervalSince($0.at) / 60)) min ago" } ?? "no file yet")")
+        // The notch prefers whichever source is newer.
+        let older = ClaudePlanUsage.Sample(session: 10, week: 20, at: Date().addingTimeInterval(-3600))
+        let newer = ClaudeUsage(session: .init(used: 70, resetsAt: Date().addingTimeInterval(1800)),
+                                week: .init(used: 30, resetsAt: Date().addingTimeInterval(86_400)),
+                                model: nil, updated: Date())
+        let pick = UsagePages.best(file: older, statusLine: newer)
+        log("newest source wins: session \(Int(pick?.session ?? -1))% (want 70, from the newer one)")
+        let pickFile = UsagePages.best(file: older, statusLine: nil)
+        log("with only the file: session \(Int(pickFile?.session ?? -1))% (want 10)")
+    }
+
+    // MARK: Dragging a copied screenshot out of the clipboard
+
+    private static func clipboardDrag() {
+        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 12, pixelsHigh: 8, bitsPerSample: 8,
+                                      samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                      bytesPerRow: 0, bitsPerPixel: 0)!
+        for (label, data, type) in [("PNG", bitmap.representation(using: .png, properties: [:]), NSPasteboard.PasteboardType.png),
+                                    ("TIFF", bitmap.tiffRepresentation, NSPasteboard.PasteboardType.tiff)] {
+            guard let data else { continue }
+            let clip = ClipItem(content: .image(data, type), key: label, preview: nil, appBundleID: nil, date: .now)
+            let url = ClipFiles.file(for: clip)
+            let onDisk = url.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+            let readable = url.flatMap { NSImage(contentsOf: $0) } != nil
+            let provider = clip.itemProvider
+            let carriesFile = provider.registeredTypeIdentifiers.contains { $0.contains("file-url") || $0.contains("public.png") }
+            log("drag a copied \(label) screenshot: file=\(url?.pathExtension ?? "none") saved=\(onDisk) opens=\(readable) drag carries a file=\(carriesFile) (want png, true, true, true)")
+            if let url { try? FileManager.default.removeItem(at: url) }
+        }
+        let text = ClipItem(content: .text("hello"), key: "t", preview: nil, appBundleID: nil, date: .now)
+        log("drag a copied text clip: \(text.itemProvider.registeredTypeIdentifiers.first ?? "nothing") (want public.utf8-plain-text or similar)")
     }
 
     // MARK: Apple Calendar and Reminders

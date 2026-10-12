@@ -21,6 +21,10 @@ struct NotchRootView: View {
         }
         .frame(width: size.width, height: size.height)
         .contentShape(shape)
+        .overlay(alignment: .topTrailing) {
+            // Outside the notch's clipping, so a tall card hangs below it like a dropdown.
+            if vm.isOpen { cards.padding(.trailing, NotchViewModel.openFlare + 8) }
+        }
         .overlay(alignment: .top) {
             // Only the notch row: the row under it (lyrics, Allow/Deny, Add to Tray) takes its own clicks.
             if !vm.isOpen {
@@ -77,6 +81,25 @@ struct NotchRootView: View {
         }
     }
 
+    @ViewBuilder private var cards: some View {
+        let top = vm.geometry.notchSize.height + 32
+        if vm.statusCardShown {
+            StatusCard(vm: vm)
+                .padding(.top, top)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+        } else if vm.usageCardShown {
+            UsageCard(vm: vm)
+                .padding(.top, top)
+                .padding(.trailing, 30)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+        } else if vm.timerCardShown {
+            TimerCard(vm: vm)
+                .padding(.top, top)
+                .padding(.trailing, 46)
+                .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+        }
+    }
+
     @ViewBuilder private var content: some View {
         if vm.isOpen {
             // Fixed size so the spring reveals the layout instead of squashing it.
@@ -114,18 +137,6 @@ struct OpenNotchView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.bottom, 16)
         }
-        .overlay(alignment: .topTrailing) {
-            if vm.statusCardShown {
-                StatusCard(vm: vm)
-                    .padding(.top, vm.geometry.notchSize.height + 26)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
-            } else if vm.timerCardShown {
-                TimerCard(vm: vm)
-                    .padding(.top, vm.geometry.notchSize.height + 26)
-                    .padding(.trailing, 60)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
-            }
-        }
         .overlay(alignment: .bottom) {
             if let request = vm.claudeRequest {
                 ClaudeAskBar(request: request, bridge: vm.claude, waiting: vm.claude.pending.count)
@@ -149,7 +160,7 @@ struct OpenNotchView: View {
             }
             Spacer()
             // One click each: straight to Claude's or Gemini's usage page.
-            if claudeUsageButton { UsageIconButton(kind: .claude, claude: vm.claude) }
+            if claudeUsageButton { UsageIconButton(kind: .claude, claude: vm.claude, vm: vm) }
             if geminiEnabled { UsageIconButton(kind: .gemini, claude: vm.claude) }
             TimerButton(vm: vm)
             StatusButton(vm: vm)
@@ -233,6 +244,8 @@ struct StatusCard: View {
         let stats = vm.stats
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         VStack(alignment: .leading, spacing: 8) {
+            KeepAwakeRow(keepAwake: vm.keepAwake)
+            Divider().overlay(Color.white.opacity(0.08))
             if weatherEnabled {
                 if let weather = vm.weather.now {
                     row(weather.symbol, multicolor: true,
@@ -253,36 +266,14 @@ struct StatusCard: View {
                 row("arrow.up.arrow.down", title: "↓ \(SystemSnapshot.rate(snapshot.download))",
                     detail: "↑ \(SystemSnapshot.rate(snapshot.upload))")
             }
-            ForEach(vm.bluetoothDevices.prefix(4)) { device in
+            ForEach(vm.bluetoothDevices.prefix(3)) { device in
                 row(device.symbol, title: "\(device.name) \(device.level)%", detail: "")
                     .foregroundStyle(device.level <= 20 ? Color.red : Color.primary)
             }
-            Divider().overlay(Color.white.opacity(0.08))
-            Button { vm.keepAwake.toggle() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: vm.keepAwake.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
-                        .font(.system(size: 12))
-                        .foregroundStyle(vm.keepAwake.isOn ? Color.orange : Color.primary)
-                        .frame(width: 16)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Keep Awake").font(.system(size: 11, weight: .semibold))
-                        Text(vm.keepAwake.isOn ? "On: the screen won't sleep" : "Stop the screen from sleeping")
-                            .font(.system(size: 9)).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Capsule()
-                        .fill(vm.keepAwake.isOn ? Color.orange : Color.white.opacity(0.18))
-                        .frame(width: 26, height: 15)
-                        .overlay(alignment: vm.keepAwake.isOn ? .trailing : .leading) {
-                            Circle().fill(Color.white).padding(2)
-                        }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
         }
         .padding(12)
         .frame(width: 236, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(shape.fill(Color(white: 0.11)))
         .overlay(shape.strokeBorder(Color.white.opacity(0.08)))
         .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
@@ -305,6 +296,92 @@ struct StatusCard: View {
 
     private static func memory(_ bytes: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
+    }
+}
+
+/// Keep Awake, at the top of the status card so it's always reachable. Two kinds: keep the screen
+/// on while you work, or keep the Mac running with the lid shut.
+struct KeepAwakeRow: View {
+    let keepAwake: KeepAwake
+    @State private var mode: KeepAwake.Mode = .screen
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: keepAwake.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+                        .font(.system(size: 12))
+                        .foregroundStyle(keepAwake.isOn ? Color.orange : Color.primary)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Keep Awake").font(.system(size: 11, weight: .semibold))
+                        Text(detail(at: context.date))
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 5) {
+                    ForEach([KeepAwake.Mode.screen, .lidClosed], id: \.rawValue) { option in
+                        chip(option.title, filled: chosen == option) { pick(option) }
+                    }
+                }
+                .padding(.leading, 24)
+                HStack(spacing: 5) {
+                    if keepAwake.isOn {
+                        chip("Turn off", filled: true) { keepAwake.off() }
+                        if keepAwake.until != nil { chip("+1h") { keepAwake.on(minutes: 60, mode: chosen) } }
+                    } else {
+                        chip("15m") { keepAwake.on(minutes: 15, mode: chosen) }
+                        chip("1h") { keepAwake.on(minutes: 60, mode: chosen) }
+                        chip("4h") { keepAwake.on(minutes: 240, mode: chosen) }
+                        chip("Until I turn it off", filled: true) { keepAwake.on(minutes: nil, mode: chosen) }
+                    }
+                }
+                .padding(.leading, 24)
+            }
+            .onAppear { mode = keepAwake.mode }
+        }
+    }
+
+    /// While it's running, the mode in use; otherwise the one you've picked for next time.
+    private var chosen: KeepAwake.Mode { keepAwake.isOn ? keepAwake.mode : mode }
+
+    private func pick(_ option: KeepAwake.Mode) {
+        mode = option
+        // Switching while it's running moves the running session over.
+        if keepAwake.isOn, keepAwake.mode != option {
+            let minutes = keepAwake.remaining().map { Int($0 / 60) + 1 }
+            keepAwake.on(minutes: minutes, mode: option)
+        }
+    }
+
+    private func detail(at now: Date) -> String {
+        guard keepAwake.isOn else {
+            return chosen == .lidClosed
+                ? "Keeps running with the lid shut (asks for your password)"
+                : "Stops the screen from sleeping"
+        }
+        let what = keepAwake.mode == .lidClosed ? "Lid closed" : "Screen on"
+        guard let left = keepAwake.remaining(at: now), let until = keepAwake.until else {
+            return "\(what) · until you turn it off"
+        }
+        let minutes = Int(left / 60) + 1
+        return "\(what) · \(minutes < 60 ? "\(minutes) min" : "\(minutes / 60)h \(minutes % 60)m") left, until \(until.formatted(date: .omitted, time: .shortened))"
+    }
+
+    private func chip(_ title: String, filled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .foregroundStyle(filled ? Color.black : Color.white)
+                .background(Capsule().fill(filled ? Color.orange : Color.white.opacity(0.14)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 

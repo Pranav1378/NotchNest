@@ -45,6 +45,8 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 final class NotchController {
     static let windowSize = CGSize(width: 760, height: 300)
+    /// How far below the notch a card may hang.
+    static let cardReach: CGFloat = 96
 
     private enum Axis { case horizontal, vertical }
 
@@ -162,10 +164,15 @@ final class NotchController {
         let shape = shapeRect()
 
         // Closed: only the notch itself is a hover target, so the menu bar beside it stays usable.
-        let zone = vm.isOpen
+        var zone = vm.isOpen
             ? shape.insetBy(dx: -10, dy: -14)
             : CGRect(x: geo.notchMidX - geo.notchSize.width / 2, y: top - geo.notchSize.height - 2,
                      width: geo.notchSize.width, height: geo.notchSize.height + 3)
+        // A status or timer card hangs below the notch: keep it hoverable and clickable.
+        if vm.isOpen && (vm.statusCardShown || vm.timerCardShown || vm.usageCardShown) {
+            zone = zone.union(CGRect(x: shape.minX, y: shape.minY - Self.cardReach,
+                                     width: shape.width, height: Self.cardReach + 1))
+        }
         var hovering = zone.contains(mouse)
 
         trackFileDrag()

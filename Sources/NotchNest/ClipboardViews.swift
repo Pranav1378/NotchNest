@@ -306,13 +306,59 @@ extension ClipItem {
     /// A copied colour code, shown as a swatch.
     var swatch: Color? { ClipColor.parse(text) }
 
-    /// What dragging the card out carries.
+    /// What dragging the card out carries. Images go as a real PNG file: Finder, Messages, Slack and
+    /// the rest only take a file, not raw image data, which is why dragging a copied screenshot
+    /// used to do nothing.
     var itemProvider: NSItemProvider {
         switch content {
-        case .text(let text): return NSItemProvider(object: text as NSString)
-        case .image(let data, _): return NSImage(data: data).map { NSItemProvider(object: $0) } ?? NSItemProvider()
-        case .files(let urls): return NSItemProvider(contentsOf: urls[0]) ?? NSItemProvider()
+        case .text(let text):
+            return NSItemProvider(object: text as NSString)
+        case .image:
+            guard let url = ClipFiles.file(for: self), let provider = NSItemProvider(contentsOf: url) else {
+                return NSItemProvider()
+            }
+            provider.suggestedName = url.lastPathComponent
+            return provider
+        case .files(let urls):
+            guard let provider = NSItemProvider(contentsOf: urls[0]) else { return NSItemProvider() }
+            provider.suggestedName = urls[0].lastPathComponent
+            return provider
         }
+    }
+}
+
+/// Copied images written out as PNG files, so they can be dragged into other apps. They live in a
+/// temporary folder the system clears, and each clip is only written once.
+enum ClipFiles {
+    private static let folder = FileManager.default.temporaryDirectory
+        .appendingPathComponent("NotchNest-clips", isDirectory: true)
+    private static var made: [UUID: URL] = [:]
+
+    static func file(for item: ClipItem) -> URL? {
+        if let url = made[item.id], FileManager.default.fileExists(atPath: url.path) { return url }
+        guard case .image(let data, _) = item.content else { return nil }
+        guard let png = asPNG(data) else { return nil }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("\(name(for: item.date)).png")
+        do {
+            try png.write(to: url)
+            made[item.id] = url
+            return url
+        } catch {
+            ActivityLog.note("clipboard drag: couldn't write the image: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func asPNG(_ data: Data) -> Data? {
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { return data }  // already PNG
+        return NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:])
+    }
+
+    private static func name(for date: Date) -> String {
+        let stamp = DateFormatter()
+        stamp.dateFormat = "yyyy-MM-dd 'at' h.mm.ss a"
+        return "Screenshot \(stamp.string(from: date))"
     }
 }
 

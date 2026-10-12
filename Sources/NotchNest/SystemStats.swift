@@ -145,31 +145,157 @@ final class SystemStats {
     }
 }
 
-/// Keeps the Mac and its display awake (like `caffeinate -d`) until turned off or the app quits.
+/// Keeps the Mac and its display awake, like `caffeinate -d`: until you turn it off, or for a set
+/// time. It's remembered across restarts, so an update doesn't quietly let the Mac sleep.
 @Observable @MainActor
 final class KeepAwake {
     private(set) var isOn = false
+    /// When a timed session ends; nil while it's on with no end.
+    private(set) var until: Date?
+    @ObservationIgnored var announce: (String) -> Void = { _ in }
     @ObservationIgnored private var assertion = IOPMAssertionID(0)
+    @ObservationIgnored private var expiry: Timer?
 
-    func toggle() { if isOn { off() } else { on() } }
+    /// What "awake" means.
+    enum Mode: String {
+        /// The screen stays on while you're working (closing the lid still sleeps the Mac).
+        case screen
+        /// The Mac keeps running with the lid shut. macOS only allows this by switching sleep off
+        /// system-wide, which needs your admin password.
+        case lidClosed
 
-    func on() {
-        guard !isOn else { return }
-        var id = IOPMAssertionID(0)
-        let result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
-                                                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                                                 "NotchNest Keep Awake" as CFString, &id)
-        guard result == kIOReturnSuccess else { return }
-        assertion = id
-        isOn = true
-        ActivityLog.note("keep awake on")
+        var title: String { self == .screen ? "Screen on" : "Lid closed" }
     }
 
-    func off() {
+    private(set) var mode: Mode = .screen
+
+    func toggle() { if isOn { off() } else { on(minutes: nil) } }
+
+    /// `minutes` nil means until it's turned off.
+    func on(minutes: Int?, mode: Mode = .screen) {
+        if isOn && mode != self.mode { off(announcing: false) }
+        self.mode = mode
+        let deadline = minutes.map { Date().addingTimeInterval(Double($0) * 60) }
+        if mode == .lidClosed, !Self.setSystemSleep(disabled: true) {
+            announce("Keep Awake needs your admin password for lid-closed")
+            self.mode = .screen
+            return
+        }
+        if !isOn {
+            var id = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                                                     IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                                     "NotchNest Keep Awake" as CFString, &id)
+            guard result == kIOReturnSuccess else {
+                announce("Couldn't keep the Mac awake")
+                return
+            }
+            assertion = id
+            isOn = true
+        }
+        until = deadline
+        schedule()
+        remember()
+        ActivityLog.note("keep awake on (\(mode.rawValue))\(minutes.map { " for \($0) min" } ?? " until turned off")")
+        let what = mode == .lidClosed ? "Keep Awake with the lid closed" : "Keep Awake"
+        announce(deadline == nil ? "\(what) on" : "\(what) on \(Self.describe(minutes ?? 0))")
+    }
+
+    func off(announcing: Bool = true) {
+        expiry?.invalidate()
+        expiry = nil
+        until = nil
         guard isOn else { return }
         IOPMAssertionRelease(assertion)
+        if mode == .lidClosed { _ = Self.setSystemSleep(disabled: false) }
         isOn = false
+        remember()
         ActivityLog.note("keep awake off")
+        if announcing { announce("Keep Awake off") }
+    }
+
+    /// Turns it back on after a restart if it was on (and a timed session hasn't run out).
+    func restore() {
+        mode = Mode(rawValue: UserDefaults.standard.string(forKey: Prefs.keepAwakeMode) ?? "") ?? .screen
+        guard Prefs.bool(Prefs.keepAwake) else {
+            // A crash while lid-closed was on would leave macOS unable to sleep: put it back.
+            if mode == .lidClosed && Self.systemSleepDisabled() { _ = Self.setSystemSleep(disabled: false) }
+            return
+        }
+        let saved = UserDefaults.standard.double(forKey: Prefs.keepAwakeUntil)
+        if saved > 0 {
+            let deadline = Date(timeIntervalSince1970: saved)
+            guard deadline > Date() else {
+                remember(on: false)
+                return
+            }
+            on(minutes: Int(deadline.timeIntervalSinceNow / 60) + 1, mode: mode)
+        } else {
+            on(minutes: nil, mode: mode)
+        }
+    }
+
+    func remaining(at now: Date = .now) -> TimeInterval? {
+        until.map { max(0, $0.timeIntervalSince(now)) }
+    }
+
+    /// "for 15 min", "for 1 hour", "for 4 hours".
+    static func describe(_ minutes: Int) -> String {
+        switch minutes {
+        case ..<60: return "for \(minutes) min"
+        case 60: return "for 1 hour"
+        default: return "for \(minutes / 60) hours"
+        }
+    }
+
+    private func schedule() {
+        expiry?.invalidate()
+        guard let until else {
+            expiry = nil
+            return
+        }
+        let timer = Timer(fire: until, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.off(announcing: false)
+                self?.announce("Keep Awake finished")
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        expiry = timer
+    }
+
+    private func remember(on: Bool? = nil) {
+        UserDefaults.standard.set(on ?? isOn, forKey: Prefs.keepAwake)
+        UserDefaults.standard.set(until?.timeIntervalSince1970 ?? 0, forKey: Prefs.keepAwakeUntil)
+        UserDefaults.standard.set(mode.rawValue, forKey: Prefs.keepAwakeMode)
+    }
+
+    /// Lid-closed needs macOS's system-wide sleep switch, which only admins can change: macOS asks
+    /// for the password itself. Returns whether it worked.
+    static func setSystemSleep(disabled: Bool) -> Bool {
+        let command = "/usr/bin/pmset -a disablesleep \(disabled ? 1 : 0)"
+        let script = "do shell script \"\(command)\" with administrator privileges"
+        var error: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        if let error {
+            ActivityLog.note("keep awake: pmset disablesleep \(disabled ? 1 : 0) failed (\(error[NSAppleScript.errorNumber] ?? "?"))")
+            return false
+        }
+        ActivityLog.note("keep awake: system sleep \(disabled ? "disabled" : "restored")")
+        return true
+    }
+
+    /// Whether macOS currently has sleep switched off (what lid-closed mode sets).
+    static func systemSleepDisabled() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["-g"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        guard (try? process.run()) != nil else { return false }
+        let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        process.waitUntilExit()
+        return text.split(separator: "\n").contains { $0.contains("SleepDisabled") && $0.contains("1") }
     }
 }
 

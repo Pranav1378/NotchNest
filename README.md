@@ -118,12 +118,12 @@ To check yourself: **Settings → General → Check for Updates…**
 | Click / **⌘-click** / **⇧-click** / drag a box | Selects items in the Tray, like in Finder |
 | **⌘A**, **⌘C**, **Delete** | Select all, copy, remove selected (in the Tray) |
 | Right-click a screenshot in the Tray → **Copy Text** | Copies the words in the picture |
-| Tray → **Clipboard** | Your last 30 copies. Click one to copy it again. ✕ deletes it. |
+| Tray → **Clipboard** | Your last 30 copies. Click one to copy it again, or **drag it out** into any app — a copied screenshot drags out as a PNG file. ✕ deletes it. |
 | Click the ☁ weather / battery | Weather, battery health, CPU, memory and network speed |
 | Click the sides of a live activity (or swipe on it) | Shrinks it. Click or swipe again to bring it back. |
 | Click the ⏱ next to the battery | A timer (1–30 min presets or your own length) or a **Pomodoro** (25 min focus, 5 min break). The countdown stays in the notch while it's closed. |
 | Click the speaker icon next to the song | Switch where sound plays: speakers, AirPods, a monitor |
-| Click the battery → **Keep Awake** | Stops your screen from sleeping until you turn it off. The same card shows your Magic Mouse / Keyboard / AirPods battery. |
+| Click the battery → **Keep Awake** | **Screen on** keeps the screen awake while you work; **Lid closed** keeps the Mac running with the lid shut (macOS asks for your password, since that switches system sleep off). Pick 15m, 1h, 4h or until you turn it off. The same card shows battery health, CPU, network and your Magic Mouse / Keyboard / AirPods battery. |
 | Tray → **Clipboard**: copied a link, email or colour | **Open** and **Email** buttons appear on the card; colour codes like `#ff8800` show as a swatch |
 | Right-click files in the Tray → **Convert to** / **Zip** | Turns images into JPEG, PNG or HEIC, or zips the selection. The new file lands in the Tray. |
 | A download finishes | The notch shows it with **Add to Tray** |
@@ -131,7 +131,7 @@ To check yourself: **Settings → General → Check for Updates…**
 | A meeting with a video link is coming up | Click **Join** in the notch |
 | Using Claude Code? | Settings → **Claude & Gemini** → **Connect**. When Claude needs permission, the notch shows **Allow / Deny**; when it finishes, the notch tells you. |
 | Pick a Reminders list | In the Tasks tab, click the list name: Google Tasks lists and Reminders lists are both there |
-| Check your AI usage | Click **✦** (Claude) or **✨** (Gemini) in the notch's top bar. With Accessibility permission, each app's own usage window opens over what you're doing; otherwise the usage page opens in your browser. Switch the buttons on or off in Settings → Claude & Gemini. |
+| Check your AI usage | Click **✦** in the notch: your Claude session and weekly usage appear right there, read from the Claude app's own data on your Mac (no sign-in, no Terminal). **✨** opens Gemini's usage page. Switch either off in Settings → Claude & Gemini. |
 | More than one screen | Settings → General → **Displays**: keep the notch on your MacBook, on your main monitor, or have it follow your pointer. Screens without a notch get a small black one in the menu bar. |
 
 Every feature can be switched off in **Settings → General**.

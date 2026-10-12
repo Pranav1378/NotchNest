@@ -117,6 +117,7 @@ final class NotchViewModel {
     var headphones: HeadphonesInfo?
     var statusCardShown = false
     var timerCardShown = false
+    var usageCardShown = false
     var downloadNotice: DownloadNotice?
     var timerAlert: TimerAlert?
     var claudeDone: ClaudeFinished?
@@ -150,6 +151,7 @@ final class NotchViewModel {
     let claude: ClaudeBridge
     let privacy: PrivacyMonitor
     let keepAwake: KeepAwake
+    let planUsage: ClaudePlanUsage
     @ObservationIgnored var openSettings: () -> Void = {}
     /// Whether the pointer is over the notch (set by NotchController); short notices wait for it to leave.
     @ObservationIgnored var pointerInside: () -> Bool = { false }
@@ -167,7 +169,8 @@ final class NotchViewModel {
     init(media: MediaController, calendar: CalendarService, battery: BatteryMonitor, tray: TrayStore,
          camera: CameraMirror, tasks: TasksService, clipboard: ClipboardHistory, lyrics: LyricsService,
          weather: WeatherService, stats: SystemStats, timer: FocusTimer, claude: ClaudeBridge,
-         privacy: PrivacyMonitor, keepAwake: KeepAwake) {
+         privacy: PrivacyMonitor, keepAwake: KeepAwake, planUsage: ClaudePlanUsage) {
+        self.planUsage = planUsage
         self.timer = timer
         self.claude = claude
         self.privacy = privacy
@@ -438,6 +441,7 @@ final class NotchViewModel {
             composingEvent = false
             statusCardShown = false
             timerCardShown = false
+            usageCardShown = false
         }
         eventMessage = nil
         stats.setActive(false)
@@ -461,7 +465,10 @@ final class NotchViewModel {
     func toggleStatusCard() {
         withAnimation(.smooth(duration: 0.2)) {
             statusCardShown.toggle()
-            if statusCardShown { timerCardShown = false }
+            if statusCardShown {
+                timerCardShown = false
+                usageCardShown = false
+            }
         }
         stats.setActive(statusCardShown)
         if statusCardShown {
@@ -472,9 +479,23 @@ final class NotchViewModel {
     func toggleTimerCard() {
         withAnimation(.smooth(duration: 0.2)) {
             timerCardShown.toggle()
-            if timerCardShown { statusCardShown = false }
+            if timerCardShown {
+                statusCardShown = false
+                usageCardShown = false
+            }
         }
         if timerCardShown { stats.setActive(false) }
+    }
+
+    func toggleUsageCard() {
+        planUsage.reload()
+        withAnimation(.smooth(duration: 0.2)) {
+            usageCardShown.toggle()
+            if usageCardShown {
+                statusCardShown = false
+                timerCardShown = false
+            }
+        }
     }
 
     // MARK: Quick-add event

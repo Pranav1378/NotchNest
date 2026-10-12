@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var claude: ClaudeBridge!
     private var privacy: PrivacyMonitor!
     private var keepAwake: KeepAwake!
+    private var planUsage: ClaudePlanUsage!
     private var updater: Updater?
     private var settingsWindow: NSWindow?
 
@@ -44,14 +45,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         claude = ClaudeBridge(port: testing ? ClaudeBridge.defaultPort + 1 : ClaudeBridge.defaultPort)
         privacy = PrivacyMonitor()
         keepAwake = KeepAwake()
+        planUsage = ClaudePlanUsage()
 
         vm = NotchViewModel(media: media, calendar: calendar, battery: battery, tray: tray, camera: camera,
                             tasks: tasks, clipboard: clipboard, lyrics: LyricsService(), weather: weather,
                             stats: SystemStats(), timer: FocusTimer(), claude: claude, privacy: privacy,
-                            keepAwake: keepAwake)
+                            keepAwake: keepAwake, planUsage: planUsage)
         vm.openSettings = { [weak self] in self?.showSettings() }
         UsagePages.announce = { [weak self] message in self?.vm.showToast(message) }
+        keepAwake.announce = { [weak self] message in self?.vm.showToast(message) }
 
+        planUsage.start()
+        keepAwake.restore()  // an update shouldn't quietly let the Mac sleep
         media.start()
         battery.start()
         calendar.start()
@@ -69,6 +74,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if args.contains("--featuretest") {
             FeatureTest.run(vm: vm, notch: notch)
+            return
+        }
+        if let flag = args.firstIndex(of: "--axdump"), flag + 1 < args.count {
+            let bundle = args[flag + 1]
+            let items = Array(args.dropFirst(flag + 2))
+            AppAutomation.dumpSettingsTree(bundleID: bundle, pressing: items) { exit(0) }
+            return
+        }
+        if let flag = args.firstIndex(of: "--axtray"), flag + 1 < args.count {
+            let bundle = args[flag + 1]
+            let right = args.contains("right")
+            Task { @MainActor in
+                guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first else {
+                    print("axtray: \(bundle) isn't running")
+                    exit(0)
+                }
+                let pid = app.processIdentifier
+                await withCheckedContinuation { continuation in
+                    AXSearch.queue.async {
+                        let opened = AXSearch.pressMenuBarItem(pid: pid, rightClick: right)
+                        print("axtray: opened=\(opened) right-click=\(right)")
+                        Thread.sleep(forTimeInterval: 1.5)
+                        AXSearch.dump(pid: pid)
+                        continuation.resume()
+                    }
+                }
+                exit(0)
+            }
+            return
+        }
+        if args.contains("--usagetest") {
+            UsagePages.announce = { print("notch says:", $0) }
+            Task {
+                print("--- Claude (new window → usage page)")
+                await withCheckedContinuation { continuation in
+                    AppAutomation.openClaudeUsageInNewWindow(bundleID: UsagePages.claudeBundle,
+                                                             link: "claude://claude.ai/settings/usage") { outcome in
+                        print("Claude: \(outcome.rawValue)")
+                        continuation.resume()
+                    }
+                }
+                try? await Task.sleep(for: .seconds(2))
+                print("--- Gemini (settings → Usage limits)")
+                await withCheckedContinuation { continuation in
+                    AppAutomation.openUsage(bundleID: UsagePages.geminiBundle,
+                                            itemNames: ["Usage limits", "Usage"]) { outcome in
+                        print("Gemini: \(outcome.rawValue)")
+                        continuation.resume()
+                    }
+                }
+                exit(0)
+            }
             return
         }
         if args.contains("--cameratest") {
