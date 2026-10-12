@@ -148,14 +148,20 @@ enum AppAutomation {
             return
         }
         let pid = app.processIdentifier
-        settingsShortcut(to: pid)
-        AXSearch.queue.asyncAfter(deadline: .now() + 1.2) {
+        AXSearch.queue.async {
+            // Note the windows that are already open, so the new one can be told apart.
+            let before = AXSearch.windowIDs(pid: pid)
+            DispatchQueue.main.async { settingsShortcut(to: pid) }
+            // Catch it the moment it appears and park it off-screen, so it's never seen.
+            let window = AXSearch.waitForNewWindow(pid: pid, notIn: before, until: Date().addingTimeInterval(3))
+            let parked = window.map { AXSearch.moveOffScreen($0) } ?? false
             let picked = AXSearch.selectRowQuietly(pid: pid, named: item)
-            Thread.sleep(forTimeInterval: picked ? 1.0 : 0)
+            Thread.sleep(forTimeInterval: picked ? 0.8 : 0)
             let lines = picked ? AXSearch.texts(pid: pid) : []
+            if let window { AXSearch.closeWindow(window) }
             DispatchQueue.main.async {
-                closeWindowShortcut(to: pid)
-                ActivityLog.note("quiet read of \(item): picked=\(picked), \(lines.count) lines")
+                if window == nil { closeWindowShortcut(to: pid) }
+                ActivityLog.note("quiet read of \(item): parked=\(parked), picked=\(picked), \(lines.count) lines")
                 completion(lines)
             }
         }
@@ -344,6 +350,53 @@ enum AXSearch {
             for child in children(of: element) { queue.append((child, depth + 1)) }
         }
         return nil
+    }
+
+    /// Something to tell windows apart by: their position and size as a string.
+    static func windowIDs(pid: pid_t) -> Set<String> {
+        let app = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return [] }
+        return Set(windows.map { describeWindow($0) })
+    }
+
+    private static func describeWindow(_ window: AXUIElement) -> String {
+        let title = string(window, kAXTitleAttribute) ?? ""
+        let origin = point(window, kAXPositionAttribute) ?? .zero
+        let size = size(window, kAXSizeAttribute) ?? .zero
+        return "\(title)|\(Int(size.width))x\(Int(size.height))|\(Int(origin.x)),\(Int(origin.y))"
+    }
+
+    /// Waits for a window that wasn't there before (the settings window ⌘, just opened).
+    static func waitForNewWindow(pid: pid_t, notIn before: Set<String>, until deadline: Date) -> AXUIElement? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 1)
+        repeat {
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+               let windows = value as? [AXUIElement],
+               let fresh = windows.first(where: { !before.contains(describeWindow($0)) }) {
+                return fresh
+            }
+            Thread.sleep(forTimeInterval: 0.05)  // catch it before it can be seen
+        } while Date() < deadline
+        return nil
+    }
+
+    /// Parks a window far off every screen while it's read.
+    static func moveOffScreen(_ window: AXUIElement) -> Bool {
+        var corner = CGPoint(x: -30_000, y: -30_000)
+        guard let value = AXValueCreate(.cgPoint, &corner) else { return false }
+        return AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value) == .success
+    }
+
+    /// Closes a window with its own close button, rather than ⌘W, which would go to whatever is key.
+    static func closeWindow(_ window: AXUIElement) {
+        var button: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXCloseButtonAttribute as CFString, &button) == .success,
+              let button, CFGetTypeID(button) == AXUIElementGetTypeID() else { return }
+        AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
     }
 
     /// Selects a sidebar row without the window being in front. Setting AXSelected on the row (the
