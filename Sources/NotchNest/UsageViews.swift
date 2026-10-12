@@ -69,9 +69,11 @@ enum UsagePages {
         }
     }
 
+    /// Gemini keeps no usage on this Mac, so the notch opens the app's own Usage limits screen
+    /// (⌘, then the sidebar item). The web page is the fallback.
     static func openGemini() {
-        if inAppWindow(bundleID: geminiBundle, names: ["Usage limits", "Usage"], appName: "Gemini") { return }
-        // Gemini's usage page on the web, for when its own window can't be opened.
+        if Prefs.bool(Prefs.geminiUsageInApp),
+           inAppWindow(bundleID: geminiBundle, names: ["Usage limits", "Usage"], appName: "Gemini") { return }
         open("https://gemini.google.com/usage", "Gemini")
     }
 
@@ -182,12 +184,23 @@ struct UsageCard: View {
                     Text("Claude usage").font(.system(size: 11, weight: .semibold)).fixedSize()
                     if let best { Text("· \(age(best.at, now: now))").font(.system(size: 9)).foregroundStyle(.secondary) }
                     Spacer()
+                    Button { vm.planUsage.reload() } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 14)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Re-read the Claude app's numbers (it writes them every 15 minutes)")
                     link("claude.ai") { UsagePages.openClaudePage() }
-                    if geminiEnabled { link("gemini") { UsagePages.openGemini() } }
                 }
                 if let best {
                     bar("Current session", best.session, resets: best.resets?.session?.resetsAt, now: now)
                     bar("This week", best.week, resets: best.resets?.week?.resetsAt, now: now)
+                    Text("Claude writes these every 15 minutes while it's running.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
                 } else {
                     Text("No numbers yet")
                         .font(.system(size: 11, weight: .semibold))

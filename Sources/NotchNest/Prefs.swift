@@ -75,6 +75,7 @@ enum Prefs {
     static let keepAwake = "keepAwake"
     static let keepAwakeUntil = "keepAwakeUntil"
     static let keepAwakeMode = "keepAwakeMode"
+    static let geminiUsageInApp = "geminiUsageInApp"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -91,6 +92,8 @@ enum Prefs {
             // Claude's usage page opens in the Claude app when it's installed, as that app's own
             // usage window (which needs Accessibility permission) when it can.
             claudeUsageInApp: true, usageInAppWindow: false,
+            // Gemini keeps no usage on this Mac, so the notch opens the app's own Usage limits screen.
+            geminiUsageInApp: true,
             appleCalendar: false, appleReminders: false,
             // Google shows once signed in; each source can be switched off on its own.
             googleCalendar: true, googleTasks: true,
