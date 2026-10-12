@@ -152,6 +152,7 @@ final class NotchViewModel {
     let privacy: PrivacyMonitor
     let keepAwake: KeepAwake
     let planUsage: ClaudePlanUsage
+    let gemini: GeminiUsage
     @ObservationIgnored var openSettings: () -> Void = {}
     /// Whether the pointer is over the notch (set by NotchController); short notices wait for it to leave.
     @ObservationIgnored var pointerInside: () -> Bool = { false }
@@ -169,8 +170,9 @@ final class NotchViewModel {
     init(media: MediaController, calendar: CalendarService, battery: BatteryMonitor, tray: TrayStore,
          camera: CameraMirror, tasks: TasksService, clipboard: ClipboardHistory, lyrics: LyricsService,
          weather: WeatherService, stats: SystemStats, timer: FocusTimer, claude: ClaudeBridge,
-         privacy: PrivacyMonitor, keepAwake: KeepAwake, planUsage: ClaudePlanUsage) {
+         privacy: PrivacyMonitor, keepAwake: KeepAwake, planUsage: ClaudePlanUsage, gemini: GeminiUsage) {
         self.planUsage = planUsage
+        self.gemini = gemini
         self.timer = timer
         self.claude = claude
         self.privacy = privacy
@@ -487,8 +489,9 @@ final class NotchViewModel {
         if timerCardShown { stats.setActive(false) }
     }
 
-    func toggleUsageCard() {
+    func toggleUsageCard(refreshGemini: Bool = false) {
         planUsage.reload()
+        if refreshGemini && gemini.isStale { gemini.refresh() }
         withAnimation(.smooth(duration: 0.2)) {
             usageCardShown.toggle()
             if usageCardShown {

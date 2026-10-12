@@ -161,7 +161,7 @@ struct OpenNotchView: View {
             Spacer()
             // One click each: straight to Claude's or Gemini's usage page.
             if claudeUsageButton { UsageIconButton(kind: .claude, claude: vm.claude, vm: vm) }
-            if geminiEnabled { UsageIconButton(kind: .gemini, claude: vm.claude) }
+            if geminiEnabled { UsageIconButton(kind: .gemini, claude: vm.claude, vm: vm) }
             TimerButton(vm: vm)
             StatusButton(vm: vm)
             Button(action: vm.openSettings) {

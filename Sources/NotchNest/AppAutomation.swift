@@ -105,6 +105,73 @@ enum AppAutomation {
         }
     }
 
+    /// Brings the app up, opens its settings, clicks a panel, reads every line of text, then closes
+    /// the window again. The caller puts focus back where it was.
+    static func readUsagePanel(bundleID: String, item: String, completion: @escaping ([String]) -> Void) {
+        guard isTrusted, let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            completion([])
+            return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, _ in
+            guard let app else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let pid = app.processIdentifier
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                MainActor.assumeIsolated {
+                    app.activate()
+                    settingsShortcut(to: pid)
+                    AXSearch.queue.async {
+                        let pressed = AXSearch.pressItem(pid: pid, names: [item], until: Date().addingTimeInterval(5))
+                        Thread.sleep(forTimeInterval: pressed ? 1.0 : 0)
+                        let lines = AXSearch.texts(pid: pid)
+                        DispatchQueue.main.async {
+                            closeWindowShortcut(to: pid)
+                            ActivityLog.note("read \(item) in \(bundleID): pressed=\(pressed), \(lines.count) lines")
+                            completion(lines)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Experiment: open an app's settings WITHOUT bringing it to the front, read a panel, close it.
+    /// If this works, Gemini's numbers can land in the notch with no app switch at all.
+    static func quietRead(bundleID: String, item: String, completion: @escaping ([String]) -> Void) {
+        guard isTrusted, let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+            completion([])
+            return
+        }
+        let pid = app.processIdentifier
+        settingsShortcut(to: pid)
+        AXSearch.queue.asyncAfter(deadline: .now() + 1.2) {
+            let pressed = AXSearch.selectItem(pid: pid, named: item)
+            Thread.sleep(forTimeInterval: 1.2)
+            let lines = AXSearch.texts(pid: pid)
+            DispatchQueue.main.async {
+                closeWindowShortcut(to: pid)
+                ActivityLog.note("quiet read of \(item): \(pressed), \(lines.count) lines")
+                completion(lines)
+            }
+        }
+    }
+
+    /// ⌘W, to put the window away again.
+    static func closeWindowShortcut(to pid: pid_t) {
+        let w: CGKeyCode = 0x0D
+        let source = CGEventSource(stateID: .combinedSessionState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: w, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: w, keyDown: false) else { return }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.postToPid(pid)
+        up.postToPid(pid)
+    }
+
     /// `--axdump <bundle id>`: opens the app's settings and prints every named element, so the
     /// item to click can be found by its real label instead of a guess.
     static func dumpSettingsTree(bundleID: String, pressing items: [String] = [], completion: @escaping () -> Void) {
@@ -124,9 +191,10 @@ enum AppAutomation {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 MainActor.assumeIsolated {
                     app.activate()
-                    settingsShortcut(to: pid)
+                    // "asis" dumps what's already on screen instead of opening settings first.
+                    if !items.contains("asis") { settingsShortcut(to: pid) }
                     AXSearch.queue.asyncAfter(deadline: .now() + 2.5) {
-                        for item in items {
+                        for item in items where item != "asis" {
                             let pressed = AXSearch.pressItem(pid: pid, names: [item],
                                                              until: Date().addingTimeInterval(4))
                             print("axdump: pressing “\(item)” → \(pressed)")
@@ -236,6 +304,73 @@ enum AXSearch {
             for child in children(of: element) { queue.append((child, depth + 1)) }
         }
         return nil
+    }
+
+    /// Picks a row in a window that isn't in front, where a mouse click would land on the wrong app:
+    /// tries the actions a screen reader would use, and reports which one took.
+    static func selectItem(pid: pid_t, named name: String) -> String {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 2)
+        var queue: [(AXUIElement, Int)] = [(app, 0)]
+        var index = 0
+        let wanted = name.lowercased()
+        while index < queue.count, index < 20_000 {
+            let (element, depth) = queue[index]
+            index += 1
+            let matches = [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute]
+                .compactMap { string(element, $0)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .contains(wanted)
+            if matches {
+                for action in ["AXPick", kAXPressAction, "AXOpen", "AXShowMenu"] {
+                    if AXUIElementPerformAction(element, action as CFString) == .success {
+                        Thread.sleep(forTimeInterval: 0.8)
+                        if texts(pid: pid).contains(where: { $0.contains("%") || $0.lowercased().contains("resets") }) {
+                            return action
+                        }
+                    }
+                }
+                if AXUIElementSetAttributeValue(element, kAXSelectedAttribute as CFString, kCFBooleanTrue) == .success {
+                    Thread.sleep(forTimeInterval: 0.8)
+                    return "selected"
+                }
+                // Its parent row may be the selectable one.
+                var parent: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
+                   let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() {
+                    let row = parent as! AXUIElement
+                    for action in ["AXPick", kAXPressAction] where AXUIElementPerformAction(row, action as CFString) == .success {
+                        Thread.sleep(forTimeInterval: 0.8)
+                        return "parent \(action)"
+                    }
+                }
+                return "found, nothing worked"
+            }
+            if depth < 40 { for child in children(of: element) { queue.append((child, depth + 1)) } }
+        }
+        return "not found"
+    }
+
+    /// Every readable line of text in the app's windows (not menus), for reading a panel.
+    static func texts(pid: pid_t) -> [String] {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 2)
+        var queue: [(AXUIElement, Int)] = [(app, 0)]
+        var index = 0
+        var lines: [String] = []
+        while index < queue.count, index < 8000 {
+            let (element, depth) = queue[index]
+            index += 1
+            let role = string(element, kAXRoleAttribute) ?? ""
+            if role == kAXMenuRole || role == kAXMenuBarRole { continue }
+            if role == kAXStaticTextRole || role == kAXHeadingRole || role == "AXUnknown",
+               let text = [kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute]
+                   .compactMap({ string(element, $0) })
+                   .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                lines.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            if depth < 40 { for child in children(of: element) { queue.append((child, depth + 1)) } }
+        }
+        return lines
     }
 
     /// Prints every named element, depth-tagged, for `--axdump`.

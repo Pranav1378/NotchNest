@@ -79,6 +79,8 @@ enum Snapshot {
         vm.isOpen = true
         render(vm, name: "open-usage-icons", to: directory)
         vm.planUsage.reload()
+        vm.gemini.refresh()
+        try? await Task.sleep(for: .seconds(6))
         vm.usageCardShown = true
         render(vm, name: "open-usage-card", to: directory)
         vm.usageCardShown = false

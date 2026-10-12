@@ -72,7 +72,7 @@ enum UsagePages {
     /// Gemini keeps no usage on this Mac, so the notch opens the app's own Usage limits screen
     /// (⌘, then the sidebar item). The web page is the fallback.
     static func openGemini() {
-        if Prefs.bool(Prefs.geminiInAppUsage),
+        if Prefs.bool(Prefs.geminiOpensApp),
            inAppWindow(bundleID: geminiBundle, names: ["Usage limits", "Usage"], appName: "Gemini") { return }
         open("https://gemini.google.com/usage", "Gemini")
     }
@@ -119,6 +119,7 @@ struct UsageIconButton: View {
     let kind: Kind
     let claude: ClaudeBridge
     var vm: NotchViewModel?
+    
     @State private var hovering = false
 
     var body: some View {
@@ -146,11 +147,16 @@ struct UsageIconButton: View {
     }
 
     /// Claude shows its numbers in the notch; Gemini has none to read, so its button opens the page.
+    /// For --usagetest: the same thing a click does.
+    func pressForTest() { press() }
+
     private func press() {
-        if kind == .gemini || Prefs.bool(Prefs.usageInAppWindow) {
-            kind == .claude ? UsagePages.openClaude() : UsagePages.openGemini()
+        if kind == .claude, Prefs.bool(Prefs.usageInAppWindow) {
+            UsagePages.openClaude()
+        } else if kind == .gemini, Prefs.bool(Prefs.geminiOpensApp) {
+            UsagePages.openGemini()  // for people who'd rather jump into Gemini itself
         } else {
-            vm?.toggleUsageCard()
+            vm?.toggleUsageCard(refreshGemini: kind == .gemini)
         }
     }
 
@@ -166,8 +172,9 @@ struct UsageIconButton: View {
     }
 }
 
-/// Claude's usage in the notch: no app switching, no browser. The numbers come from the Claude
-/// app's own usage file on this Mac (and from Claude Code's status line when that's newer).
+/// Claude's and Gemini's usage in the notch: no app switching to read them. Claude's come from the
+/// Claude app's own file on this Mac; Gemini's are read from its Usage limits screen on request and
+/// kept here afterwards.
 struct UsageCard: View {
     let vm: NotchViewModel
     @AppStorage(Prefs.geminiUsage) private var geminiEnabled = false
@@ -175,38 +182,11 @@ struct UsageCard: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let now = context.date
-            let best = UsagePages.best(file: vm.planUsage.latest, statusLine: vm.claude.usage)
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkle").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.claude)
-                    Text("Claude usage").font(.system(size: 11, weight: .semibold)).fixedSize()
-                    if let best { Text("· \(age(best.at, now: now))").font(.system(size: 9)).foregroundStyle(.secondary) }
-                    Spacer()
-                    Button { vm.planUsage.reload() } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16, height: 14)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Re-read the Claude app's numbers (it writes them every 15 minutes)")
-                    link("claude.ai") { UsagePages.openClaudePage() }
-                }
-                if let best {
-                    bar("Current session", best.session, resets: best.resets?.session?.resetsAt, now: now)
-                    bar("This week", best.week, resets: best.resets?.week?.resetsAt, now: now)
-                    Text("Claude writes these every 15 minutes while it's running.")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                } else {
-                    Text("No numbers yet")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("They come from the Claude app on this Mac. Open Claude once and they appear here.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                claude(now: context.date)
+                if geminiEnabled {
+                    Divider().overlay(Color.white.opacity(0.08))
+                    gemini(now: context.date)
                 }
             }
         }
@@ -218,8 +198,69 @@ struct UsageCard: View {
         .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
     }
 
-    private func bar(_ title: String, _ used: Double, resets: Date?, now: Date) -> some View {
+    // MARK: Claude
+
+    @ViewBuilder private func claude(now: Date) -> some View {
+        let best = UsagePages.best(file: vm.planUsage.latest, statusLine: vm.claude.usage)
+        HStack(spacing: 5) {
+            Image(systemName: "sparkle").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.claude)
+            Text("Claude").font(.system(size: 11, weight: .semibold)).fixedSize()
+            if let best { Text("· \(age(best.at, now: now))").font(.system(size: 9)).foregroundStyle(.secondary) }
+            Spacer()
+            refreshButton(help: "Re-read Claude's numbers (it writes them every 15 minutes)") {
+                vm.planUsage.reload()
+                let at = UsagePages.best(file: vm.planUsage.latest, statusLine: vm.claude.usage)?.at
+                let minutes = at.map { Int(Date().timeIntervalSince($0) / 60) } ?? 0
+                UsagePages.announce(minutes < 1 ? "Claude's numbers are current"
+                                    : "Claude wrote these \(minutes) min ago; it refreshes every 15")
+            }
+            link("claude.ai") { UsagePages.openClaudePage() }
+        }
+        if let best {
+            bar("Current session", best.session, resets: best.resets?.session?.resetsAt, now: now)
+            bar("This week", best.week, resets: best.resets?.week?.resetsAt, now: now)
+        } else {
+            Text("Open the Claude app once and its numbers appear here.")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: Gemini
+
+    @ViewBuilder private func gemini(now: Date) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "sparkles").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.gemini)
+            Text("Gemini").font(.system(size: 11, weight: .semibold)).fixedSize()
+            if let reading = vm.gemini.latest {
+                Text("· \(age(reading.at, now: now))").font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if vm.gemini.isReading {
+                ProgressView().controlSize(.mini)
+            } else {
+                refreshButton(help: "Read Gemini's usage (its window flashes up for a second)") { vm.gemini.refresh() }
+            }
+            link("open") { UsagePages.openGemini() }
+        }
+        if let reading = vm.gemini.latest {
+            bar("Current usage", reading.session, now: now, note: reading.sessionResets)
+            bar("Weekly limit", reading.week, now: now, note: reading.weekResets)
+        } else {
+            Text(vm.gemini.isReading ? "Reading Gemini's usage…"
+                 : "Press ↻ to read it from the Gemini app; Google keeps no numbers on this Mac.")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: Pieces
+
+    private func bar(_ title: String, _ used: Double, resets: Date? = nil, now: Date, note: String = "") -> some View {
         let colour = used >= 90 ? Color(red: 0.87, green: 0.33, blue: 0.30) : Color(red: 0.33, green: 0.52, blue: 0.93)
+        let caption = resets.map { $0 > now ? "Resets \($0.formatted(date: .omitted, time: .shortened))" : "" } ?? note
         return VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).font(.system(size: 11, weight: .medium))
@@ -235,11 +276,22 @@ struct UsageCard: View {
                 }
             }
             .frame(height: 5)
-            if let resets, resets > now {
-                Text("Resets \(resets.formatted(date: .omitted, time: .shortened))")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            if !caption.isEmpty {
+                Text(caption).font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func refreshButton(help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 14)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private func link(_ title: String, action: @escaping () -> Void) -> some View {
@@ -255,7 +307,7 @@ struct UsageCard: View {
         .buttonStyle(.plain)
     }
 
-    /// "live" while the Claude app is writing, otherwise how old the last sample is.
+    /// "live" while an app is writing, otherwise how old the numbers are.
     private func age(_ date: Date, now: Date) -> String {
         let minutes = Int(now.timeIntervalSince(date) / 60)
         if minutes < 2 { return "live" }
@@ -263,4 +315,9 @@ struct UsageCard: View {
         if minutes < 1440 { return "\(minutes / 60)h ago" }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
+}
+
+extension Color {
+    /// Gemini's blue-purple, for its icon and bars.
+    static let gemini = Color(red: 0.32, green: 0.55, blue: 0.98)
 }

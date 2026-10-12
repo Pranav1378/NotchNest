@@ -151,7 +151,7 @@ struct ClaudeSettings: View {
     @AppStorage(Prefs.claudeUsageInApp) private var claudeInApp = true
     @AppStorage(Prefs.claudeUsageButton) private var claudeButton = true
     @AppStorage(Prefs.usageInAppWindow) private var inAppWindow = true
-    @AppStorage(Prefs.geminiInAppUsage) private var geminiInApp = true
+    @AppStorage(Prefs.geminiOpensApp) private var geminiOpensApp = false
     @State private var accessibility = AppAutomation.isTrusted
     @State private var installed = ClaudeHooks.isInstalled()
     @State private var statusInstalled = ClaudeHooks.statusLineInstalled()
@@ -201,9 +201,9 @@ struct ClaudeSettings: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Toggle("✨ Gemini usage button in the notch", isOn: $gemini)
-                Toggle("Open Gemini's own Usage limits screen", isOn: $geminiInApp)
+                Toggle("✨ opens the Gemini app instead of the notch card", isOn: $geminiOpensApp)
                     .disabled(!gemini)
-                Text("On: NotchNest opens the Gemini app and goes to Usage limits (needs Accessibility permission). Off: gemini.google.com/usage in your browser. Gemini keeps no usage numbers on this Mac, so they can't be shown in the notch the way Claude's are.")
+                Text("Google keeps no usage numbers on this Mac, so NotchNest reads them from Gemini's own Usage limits screen: its window flashes up for about a second when you press ↻ on the card, then the numbers live in the notch. Needs Accessibility permission.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var privacy: PrivacyMonitor!
     private var keepAwake: KeepAwake!
     private var planUsage: ClaudePlanUsage!
+    private var gemini: GeminiUsage!
     private var updater: Updater?
     private var settingsWindow: NSWindow?
 
@@ -47,13 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         privacy = PrivacyMonitor()
         keepAwake = KeepAwake()
         planUsage = ClaudePlanUsage()
+        gemini = GeminiUsage()
 
         vm = NotchViewModel(media: media, calendar: calendar, battery: battery, tray: tray, camera: camera,
                             tasks: tasks, clipboard: clipboard, lyrics: LyricsService(), weather: weather,
                             stats: SystemStats(), timer: FocusTimer(), claude: claude, privacy: privacy,
-                            keepAwake: keepAwake, planUsage: planUsage)
+                            keepAwake: keepAwake, planUsage: planUsage, gemini: gemini)
         vm.openSettings = { [weak self] in self?.showSettings() }
         UsagePages.announce = { [weak self] message in self?.vm.showToast(message) }
+        gemini.announce = { [weak self] message in self?.vm.showToast(message) }
         keepAwake.announce = { [weak self] message in self?.vm.showToast(message) }
 
         planUsage.start()
@@ -105,6 +108,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if args.contains("--quietread") {
+            Task { @MainActor in
+                await withCheckedContinuation { continuation in
+                    AppAutomation.quietRead(bundleID: UsagePages.geminiBundle, item: "Usage limits") { lines in
+                        print("quiet read got \(lines.count) lines:")
+                        for line in lines.prefix(40) where line.count < 80 { print("  •", line) }
+                        continuation.resume()
+                    }
+                }
+                exit(0)
+            }
+            return
+        }
         if args.contains("--usagetest") {
             UsagePages.announce = { print("notch says:", $0) }
             Task {
@@ -117,13 +133,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 try? await Task.sleep(for: .seconds(2))
-                print("--- Gemini (what the ✨ button itself does)")
-                UsagePages.openGemini()
-                try? await Task.sleep(for: .seconds(9))
-                let log = (try? String(contentsOf: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("NotchNest/activity.log"), encoding: .utf8)) ?? ""
-                let last = log.split(separator: "\n").last { $0.contains("Gemini") } ?? ""
-                print("Gemini: \(last.contains("usage window: pressed") ? "opened its Usage limits screen" : "fell back → \(last)")")
+                print("--- Gemini (read its numbers into the notch)")
+                vm.gemini.refresh()
+                for _ in 0..<40 where vm.gemini.isReading || vm.gemini.latest == nil {
+                    try? await Task.sleep(for: .seconds(0.5))
+                }
+                if let reading = vm.gemini.latest {
+                    print("Gemini: session \(Int(reading.session))% (\(reading.sessionResets)), week \(Int(reading.week))% (\(reading.weekResets))")
+                } else {
+                    print("Gemini: nothing read")
+                }
+                print("--- the ✨ button itself")
+                vm.isOpen = true
+                vm.usageCardShown = false
+                UsageIconButton(kind: .gemini, claude: vm.claude, vm: vm).pressForTest()
+                try? await Task.sleep(for: .seconds(1))
+                print("✨: \(vm.usageCardShown ? "showed the notch card" : "opened the Gemini app")")
+                vm.usageCardShown = false
+                vm.isOpen = false
                 exit(0)
             }
             return

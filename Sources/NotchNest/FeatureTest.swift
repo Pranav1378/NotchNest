@@ -21,6 +21,7 @@ enum FeatureTest {
             appleEventKit()
             clipboardDrag()
             planUsage()
+            geminiUsage()
             hooks()
             log("done")
             exit(0)
@@ -378,6 +379,17 @@ enum FeatureTest {
         log("newest source wins: session \(Int(pick?.session ?? -1))% (want 70, from the newer one)")
         let pickFile = UsagePages.best(file: older, statusLine: nil)
         log("with only the file: session \(Int(pickFile?.session ?? -1))% (want 10)")
+    }
+
+    // MARK: Reading Gemini's usage screen
+
+    private static func geminiUsage() {
+        let panel = ["Usage limits", "Hi Pranav,", "Updated just now", "Current usage", "5% used",
+                     "Resets at 3:02 PM", "Weekly limit", "9% used", "Resets Oct 12 at 11:02 PM",
+                     "Advanced settings"]
+        let reading = GeminiUsage.parse(panel)
+        log("gemini panel → session \(reading.map { Int($0.session) } ?? -1)% \(reading?.sessionResets ?? ""), week \(reading.map { Int($0.week) } ?? -1)% \(reading?.weekResets ?? "") (want 5% Resets at 3:02 PM, 9% Resets Oct 12 at 11:02 PM)")
+        log("a panel without the numbers is ignored: \(GeminiUsage.parse(["Appearance", "Show in Menu Bar"]) == nil) (want true)")
     }
 
     // MARK: Dragging a copied screenshot out of the clipboard

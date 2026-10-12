@@ -75,9 +75,9 @@ enum Prefs {
     static let keepAwake = "keepAwake"
     static let keepAwakeUntil = "keepAwakeUntil"
     static let keepAwakeMode = "keepAwakeMode"
-    /// A fresh key: an older build left "geminiUsageInApp" switched off on some Macs, and a stored
-    /// value beats the default below.
-    static let geminiInAppUsage = "geminiInAppUsage"
+    /// Off: ✨ shows Gemini's numbers in the notch. On: it opens the Gemini app's own screen.
+    static let geminiOpensApp = "geminiOpensApp"
+    static let geminiUsageCache = "geminiUsageCache"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -95,7 +95,7 @@ enum Prefs {
             // usage window (which needs Accessibility permission) when it can.
             claudeUsageInApp: true, usageInAppWindow: false,
             // Gemini keeps no usage on this Mac, so the notch opens the app's own Usage limits screen.
-            geminiInAppUsage: true,
+            geminiOpensApp: false,
             appleCalendar: false, appleReminders: false,
             // Google shows once signed in; each source can be switched off on its own.
             googleCalendar: true, googleTasks: true,
@@ -104,7 +104,7 @@ enum Prefs {
 
     /// Clears settings from older versions that would otherwise override today's defaults.
     static func tidyOldKeys() {
-        for key in ["geminiUsageInApp"] { UserDefaults.standard.removeObject(forKey: key) }
+        for key in ["geminiUsageInApp", "geminiInAppUsage"] { UserDefaults.standard.removeObject(forKey: key) }
     }
 
     static func bool(_ key: String) -> Bool { UserDefaults.standard.bool(forKey: key) }
